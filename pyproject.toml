@@ -1,0 +1,33 @@
+[project]
+name = "anodio"
+version = "0.1.0"
+description = "Anonymisation de la voix avec évaluation Privacy / utilité"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "soundfile>=0.12",
+    "PySide6>=6.6",
+]
+
+[project.scripts]
+anodio = "anodio.cli.main:main"
+anodio-gui = "anodio.gui.main:main"
+
+[dependency-groups]
+dev = ["pytest>=8", "mypy>=1.10"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: utilise les vrais modèles (ECAPA, Whisper)"]
+addopts = "-m 'not slow'"
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+check_untyped_defs = true

@@ -1,0 +1,29 @@
+import json
+
+from anodio.cli.main import main
+from anodio.core import load_wav, save_wav
+
+
+def test_anonymize_command_writes_wav_and_report(tmp_path, speech):
+    source = tmp_path / "interview.wav"
+    save_wav(source, speech)
+    out = tmp_path / "out"
+
+    exit_code = main(["anonymize", str(source), "--seed", "3", "--out-dir", str(out)])
+
+    assert exit_code == 0
+    anonymized = load_wav(out / "interview_anon.wav")
+    assert len(anonymized.samples) == len(speech.samples)
+    report = json.loads((out / "interview_anon.json").read_text())
+    assert report["params"]["seed"] == 3
+    assert "prosody" in report["axes"]
+
+
+def test_unreadable_input_fails_with_a_message(tmp_path, capsys):
+    source = tmp_path / "broken.wav"
+    source.write_bytes(b"garbage")
+
+    exit_code = main(["anonymize", str(source), "--seed", "1"])
+
+    assert exit_code != 0
+    assert "broken.wav" in capsys.readouterr().err
