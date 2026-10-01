@@ -89,3 +89,22 @@ def test_report_records_version_models_and_thresholds(report):
     assert data["axes"]["privacy"]["thresholds"]["max_cosine_similarity"] == 0.25
     assert data["verdict"] in (True, False)
     assert Report.from_json(report.to_json()) == report
+
+
+def test_report_carries_the_analysis_behind_its_measures(report):
+    analysis = report.analysis
+
+    assert analysis.original_f0.hz.shape == analysis.original_f0.times.shape
+    assert analysis.anonymized_f0.voiced.any()
+    assert analysis.original_mfcc.shape[1] == 13
+    assert len(analysis.original_energy_db) > 0
+
+
+def test_analysis_is_not_serialized_nor_compared(report):
+    assert "analysis" not in json.loads(report.to_json())
+    assert Report.from_json(report.to_json()) == report
+    assert Report.from_json(report.to_json()).analysis is None
+
+
+def test_rejudging_keeps_the_analysis(report):
+    assert apply_thresholds(report, {}).analysis is report.analysis

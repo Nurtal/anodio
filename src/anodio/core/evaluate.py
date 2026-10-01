@@ -16,6 +16,7 @@ import numpy as np
 from anodio.core.audio import Audio
 from anodio.core.distances import distances
 from anodio.core.features import (
+    Analysis,
     F0Contour,
     clinical_features,
     energy_db,
@@ -60,6 +61,14 @@ def evaluate(
 ) -> Report:
     """Measure and judge each Axis. Without an `embedder` / a `transcriber`, Privacy / Content is left out."""
     contour_o, contour_a = f0_contour(original), f0_contour(anonymized)
+    analysis = Analysis(
+        original_f0=contour_o,
+        anonymized_f0=contour_a,
+        original_energy_db=energy_db(original),
+        anonymized_energy_db=energy_db(anonymized),
+        original_mfcc=mfcc(original),
+        anonymized_mfcc=mfcc(anonymized),
+    )
     measured: dict[str, Measures] = {}
     models = {}
     if embedder is not None:
@@ -68,13 +77,14 @@ def evaluate(
     if transcriber is not None:
         measured["content"] = _measure_content(original, anonymized, transcriber)
         models["transcriber"] = transcriber.name
-    measured["prosody"] = _measure_prosody(original, anonymized, contour_o, contour_a)
+    measured["prosody"] = _measure_prosody(original, anonymized, analysis)
     measured["clinical"] = _measure_clinical(original, anonymized, contour_o, contour_a)
-    measured["informational"] = _measure_informational(original, anonymized, contour_o, contour_a)
+    measured["informational"] = _measure_informational(analysis)
     report = Report(
         axes={name: AxisResult(measures, {}, None) for name, measures in measured.items()},
         params=params,
         models=models,
+        analysis=analysis,
     )
     return apply_thresholds(report, thresholds)
 
@@ -151,7 +161,7 @@ def _judge_content(m: Measures, t: dict[str, float]) -> list[str]:
 # --- Prosody -----------------------------------------------------------------
 
 
-def _measure_prosody(original: Audio, anonymized: Audio, contour_o: F0Contour, contour_a: F0Contour) -> Measures:
+def _measure_prosody(original: Audio, anonymized: Audio, analysis: Analysis) -> Measures:
     pauses_o = pauses(original.samples, original.sample_rate)
     pauses_a = pauses(anonymized.samples, anonymized.sample_rate)
     boundary_error_ms = None
@@ -166,8 +176,8 @@ def _measure_prosody(original: Audio, anonymized: Audio, contour_o: F0Contour, c
         "total_pause_original_s": round(sum(e - s for s, e in pauses_o), 3),
         "total_pause_anonymized_s": round(sum(e - s for s, e in pauses_a), 3),
         "pause_boundary_error_ms": boundary_error_ms,
-        "f0_correlation": f0_correlation(contour_o, contour_a),
-        "energy_dtw_db": energy_dtw_db(energy_db(original), energy_db(anonymized)),
+        "f0_correlation": f0_correlation(analysis.original_f0, analysis.anonymized_f0),
+        "energy_dtw_db": energy_dtw_db(analysis.original_energy_db, analysis.anonymized_energy_db),
     }
 
 
@@ -251,13 +261,12 @@ def _judge_clinical(m: Measures, t: dict[str, float]) -> list[str]:
 # --- Informational -----------------------------------------------------------
 
 
-def _measure_informational(
-    original: Audio, anonymized: Audio, contour_o: F0Contour, contour_a: F0Contour
-) -> Measures:
+def _measure_informational(analysis: Analysis) -> Measures:
     """Distribution distances. They quantify change; they prove neither Privacy nor the Invariants."""
-    energy_o, energy_a = energy_db(original), energy_db(anonymized)
+    energy_o, energy_a = analysis.original_energy_db, analysis.anonymized_energy_db
+    contour_o, contour_a = analysis.original_f0, analysis.anonymized_f0
     samples = {
-        "mfcc": (mfcc(original), mfcc(anonymized)),
+        "mfcc": (analysis.original_mfcc, analysis.anonymized_mfcc),
         "f0": (contour_o.hz[contour_o.voiced], contour_a.hz[contour_a.voiced]),
         "energy": (energy_o[energy_o > SILENCE_DB], energy_a[energy_a > SILENCE_DB]),
     }

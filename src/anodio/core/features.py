@@ -194,3 +194,28 @@ def _mel_filterbank(sample_rate: int, n_fft: int) -> np.ndarray:
         falling = (high - bins) / (high - centre)
         bank[i] = np.maximum(0, np.minimum(rising, falling))
     return bank
+
+
+@dataclass(frozen=True, eq=False)
+class Analysis:
+    """Frame-level data behind a Report's measures, kept for display (never serialized)."""
+
+    original_f0: F0Contour
+    anonymized_f0: F0Contour
+    original_energy_db: np.ndarray
+    anonymized_energy_db: np.ndarray
+    original_mfcc: np.ndarray
+    anonymized_mfcc: np.ndarray
+
+
+def spectrogram(audio: Audio, max_hz: float = 5000.0) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """(times, frequencies, power in dB relative to the maximum), up to `max_hz`."""
+    from scipy.signal import spectrogram as scipy_spectrogram
+
+    window = int(0.025 * audio.sample_rate)
+    freqs, times, power = scipy_spectrogram(
+        audio.samples, audio.sample_rate, nperseg=window, noverlap=window - int(HOP_SECONDS * audio.sample_rate)
+    )
+    keep = freqs <= max_hz
+    db = 10 * np.log10(np.maximum(power[keep], 1e-12))
+    return times, freqs[keep], db - db.max()

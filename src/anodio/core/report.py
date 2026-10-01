@@ -5,8 +5,12 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from importlib.metadata import version
+from typing import TYPE_CHECKING
 
 from anodio.core.params import Params
+
+if TYPE_CHECKING:
+    from anodio.core.features import Analysis
 
 Measure = float | int | str | None
 
@@ -37,6 +41,8 @@ class Report:
     params: Params | None = None
     models: dict[str, str] = field(default_factory=dict)
     anodio_version: str = field(default_factory=lambda: version("anodio"))
+    # Frame-level data for display; neither serialized nor compared.
+    analysis: Analysis | None = field(default=None, compare=False, repr=False)
 
     @property
     def verdict(self) -> bool | None:

@@ -1,20 +1,20 @@
-"""Minimal desktop GUI: load an Original, pick a Seed, anonymize, export."""
+"""Desktop GUI: load an Original, set the Params, anonymize, inspect the Report, export."""
 
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtCore import QThread
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
-    QHBoxLayout,
     QFileDialog,
+    QHBoxLayout,
     QLabel,
     QMainWindow,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QTabWidget,
@@ -22,23 +22,20 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from anodio.core import (
-    AnodioError,
-    Audio,
-    ModelsMissingError,
-    Report,
-    SpeakerEmbedder,
-    Transcriber,
-    anonymize,
-    apply_thresholds,
-    evaluate,
-    load_wav,
-    save_wav,
-)
-from anodio.core.models import DEFAULT_WHISPER_SIZE, WHISPER_SIZES, EcapaEmbedder, WhisperTranscriber
+from anodio.core import AnodioError, Audio, Report, apply_thresholds, load_wav, save_wav
+from anodio.core.models import DEFAULT_WHISPER_SIZE, WHISPER_SIZES
 from anodio.gui.params_panel import ParamsPanel
+from anodio.gui.player import ABPlayer
+from anodio.gui.plots import F0View, HistogramView, SpectrogramView
 from anodio.gui.report_view import ReportView
 from anodio.gui.thresholds_panel import ThresholdsPanel
+from anodio.gui.worker import AnonymizationWorker, ModelCache
+
+PRIVACY_SCOPE = (
+    "La Privacy est évaluée face à un système automatique de vérification du locuteur (ECAPA) "
+    "uniquement, pas face à un auditeur humain."
+)
+
 
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
@@ -48,42 +45,45 @@ class MainWindow(QMainWindow):
         self.original_path: Path | None = None
         self.anonymized: Audio | None = None
         self.report: Report | None = None
-        self._embedder: SpeakerEmbedder | None = None
-        self._transcribers: dict[str, Transcriber] = {}
-        self._warned_missing: set[str] = set()
+        self.models = ModelCache()
+        self._warned: set[str] = set()
+        self._thread: QThread | None = None
+        self._worker: AnonymizationWorker | None = None
 
         self.file_label = QLabel("Aucun fichier chargé.")
         load_button = QPushButton("Charger un .wav…")
         load_button.clicked.connect(self.load)
-
         self.params_panel = ParamsPanel()
-
         self.whisper_size = QComboBox()
         self.whisper_size.addItems(WHISPER_SIZES)
         self.whisper_size.setCurrentText(DEFAULT_WHISPER_SIZE)
-        models_row = QHBoxLayout()
-        models_row.addWidget(QLabel("Modèle Whisper (contenu) :"))
-        models_row.addWidget(self.whisper_size)
-        models_row.addStretch(1)
+        self.thresholds_panel = ThresholdsPanel()
+        self.thresholds_panel.changed.connect(self.rejudge)
 
         self.anonymize_button = QPushButton("Anonymiser")
         self.anonymize_button.setEnabled(False)
         self.anonymize_button.clicked.connect(self.run_anonymization)
-
         self.export_button = QPushButton("Exporter…")
         self.export_button.setEnabled(False)
         self.export_button.clicked.connect(self.export)
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 0)
+        self.progress_bar.hide()
+        self.status = QLabel()
 
         self.results = ReportView()
-        self.thresholds_panel = ThresholdsPanel()
-        self.thresholds_panel.changed.connect(self.rejudge)
-        scope = QLabel(
-            "La Privacy est évaluée face à un système automatique de vérification du locuteur (ECAPA) "
-            "uniquement, pas face à un auditeur humain."
-        )
+        self.spectrograms = SpectrogramView()
+        self.f0_view = F0View()
+        self.histograms = HistogramView()
+        self.player = ABPlayer()
+        scope = QLabel(PRIVACY_SCOPE)
         scope.setWordWrap(True)
         scope.setStyleSheet("color: gray; font-size: 11px;")
 
+        models_row = QHBoxLayout()
+        models_row.addWidget(QLabel("Modèle Whisper (contenu) :"))
+        models_row.addWidget(self.whisper_size)
+        models_row.addStretch(1)
         controls = QVBoxLayout()
         controls.addWidget(load_button)
         controls.addWidget(self.file_label)
@@ -100,11 +100,17 @@ class MainWindow(QMainWindow):
         left = QVBoxLayout()
         left.addWidget(scroll, 1)
         left.addWidget(self.anonymize_button)
+        left.addWidget(self.progress_bar)
+        left.addWidget(self.status)
         left.addWidget(self.export_button)
 
         self.tabs = QTabWidget()
         self.tabs.addTab(self.results, "Rapport")
+        self.tabs.addTab(self.spectrograms, "Spectrogrammes")
+        self.tabs.addTab(self.f0_view, "Intonation (F0)")
+        self.tabs.addTab(self.histograms, "Distributions")
         right = QVBoxLayout()
+        right.addWidget(self.player)
         right.addWidget(self.tabs, 1)
         right.addWidget(scope)
 
@@ -118,75 +124,85 @@ class MainWindow(QMainWindow):
 
     def load(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Charger un enregistrement", "", "Fichiers WAV (*.wav)")
-        if not path:
-            return
+        if path:
+            self.load_path(Path(path))
+
+    def load_path(self, path: Path) -> None:
         try:
             self.original = load_wav(path)
         except AnodioError as exc:
             QMessageBox.critical(self, "Erreur de chargement", str(exc))
             return
-        self.original_path = Path(path)
+        self.original_path = path
         self.anonymized = self.report = None
         self.export_button.setEnabled(False)
         self.anonymize_button.setEnabled(True)
         self.results.clear()
-        self.file_label.setText(
-            f"{self.original_path.name} — {self.original.duration:.1f} s, {self.original.sample_rate} Hz"
-        )
+        for view in (self.spectrograms, self.f0_view, self.histograms):
+            view.clear()
+        self.player.set_audio(self.original, None)
+        self.file_label.setText(f"{path.name} — {self.original.duration:.1f} s, {self.original.sample_rate} Hz")
 
     def run_anonymization(self) -> None:
         assert self.original is not None
-        params = self.params_panel.params()
-        QGuiApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        try:
-            embedder = self.embedder()
-            transcriber = self.transcriber()
-            self.anonymized = anonymize(self.original, params)
-            self.report = evaluate(
-                self.original,
-                self.anonymized,
-                params=params,
-                thresholds=self.thresholds_panel.thresholds(),
-                embedder=embedder,
-                transcriber=transcriber,
-            )
-        finally:
-            QGuiApplication.restoreOverrideCursor()
+        self._set_busy(True)
+        self._thread = QThread(self)
+        self._worker = AnonymizationWorker(
+            self.original,
+            self.params_panel.params(),
+            self.thresholds_panel.thresholds(),
+            self.whisper_size.currentText(),
+            self.models,
+        )
+        self._worker.moveToThread(self._thread)
+        self._thread.started.connect(self._worker.run)
+        self._worker.progress.connect(self.status.setText)
+        self._worker.warning.connect(self._warn)
+        self._worker.finished.connect(self._on_finished)
+        self._worker.failed.connect(self._on_failed)
+        for signal in (self._worker.finished, self._worker.failed):
+            signal.connect(self._thread.quit)
+        self._thread.finished.connect(self._worker.deleteLater)
+        self._thread.start()
+
+    def wait_for_worker(self) -> None:
+        """Block until the current run is over (used by scripts and tests)."""
+        if self._thread is not None:
+            self._thread.wait()
+            QApplication.processEvents()
+
+    def _on_finished(self, anonymized: Audio, report: Report, spectrograms) -> None:
+        assert self.original is not None
+        self.anonymized, self.report = anonymized, report
+        self._set_busy(False)
+        self.status.setText("Terminé.")
         self.export_button.setEnabled(True)
-        self.results.show_report(self.report)
+        self.results.show_report(report)
+        self.spectrograms.show(*spectrograms)
+        self.f0_view.show(report)
+        self.histograms.show(report)
+        self.player.set_audio(self.original, anonymized)
+
+    def _on_failed(self, message: str) -> None:
+        self._set_busy(False)
+        self.status.setText("Échec.")
+        QMessageBox.critical(self, "Erreur", message)
+
+    def _set_busy(self, busy: bool) -> None:
+        self.anonymize_button.setEnabled(not busy)
+        self.progress_bar.setVisible(busy)
+        if busy:
+            self.export_button.setEnabled(False)
+
+    def _warn(self, title: str, message: str) -> None:
+        if message not in self._warned:
+            self._warned.add(message)
+            QMessageBox.warning(self, title, message)
 
     def rejudge(self) -> None:
         if self.report is not None:
             self.report = apply_thresholds(self.report, self.thresholds_panel.thresholds())
             self.results.show_report(self.report)
-
-    def embedder(self) -> SpeakerEmbedder | None:
-        """The ASV attacker, loaded on first use. Without models, the Privacy Axis is skipped."""
-        if self._embedder is None:
-            try:
-                self._embedder = EcapaEmbedder()
-            except ModelsMissingError as exc:
-                self._warn_missing("Privacy non évaluée", exc)
-        return self._embedder
-
-    def transcriber(self) -> Transcriber | None:
-        """Whisper of the selected size, loaded on first use. Without it, the Content Axis is skipped."""
-        size = self.whisper_size.currentText()
-        if size not in self._transcribers:
-            try:
-                self._transcribers[size] = WhisperTranscriber(size)
-            except ModelsMissingError as exc:
-                self._warn_missing("Contenu non évalué", exc)
-                return None
-        return self._transcribers[size]
-
-    def _warn_missing(self, title: str, error: ModelsMissingError) -> None:
-        if str(error) in self._warned_missing:
-            return
-        self._warned_missing.add(str(error))
-        QGuiApplication.restoreOverrideCursor()
-        QMessageBox.warning(self, title, str(error))
-        QGuiApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
 
     def export(self) -> None:
         assert self.anonymized is not None and self.report is not None and self.original_path is not None
