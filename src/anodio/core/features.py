@@ -152,3 +152,45 @@ def _speech_rate(sound: parselmouth.Sound, contour: F0Contour, audio: Audio, pau
     first, last = np.flatnonzero(active)[[0, -1]]
     speaking = (last - first + 1) * HOP_SECONDS - sum(e - s for s, e in pause_list)
     return nuclei / speaking if speaking > 0 else 0.0
+
+
+MFCC_COUNT = 13
+MEL_FILTERS = 26
+
+
+def mfcc(audio: Audio) -> np.ndarray:
+    """MFCC c1..c13 (frames x 13) of the non-silent 25 ms frames."""
+    from scipy.fft import dct
+
+    sr = audio.sample_rate
+    x = np.append(audio.samples[0], audio.samples[1:] - 0.97 * audio.samples[:-1]).astype(np.float64)
+    frame, hop = int(0.025 * sr), int(HOP_SECONDS * sr)
+    if len(x) < frame:
+        return np.zeros((0, MFCC_COUNT))
+    n_fft = 1 << (frame - 1).bit_length()
+    starts = np.arange(0, len(x) - frame + 1, hop)
+    frames = np.stack([x[s : s + frame] for s in starts]) * np.hamming(frame)
+    power = np.abs(np.fft.rfft(frames, n_fft)) ** 2
+    log_mel = np.log(power @ _mel_filterbank(sr, n_fft).T + 1e-10)
+    coefficients = dct(log_mel, type=2, norm="ortho", axis=1)[:, 1 : MFCC_COUNT + 1]
+    rms = np.sqrt(np.mean(frames**2, axis=1))
+    speech = 20 * np.log10(np.maximum(rms, 1e-12) / max(rms.max(), 1e-12)) > SILENCE_DB
+    return coefficients[speech]
+
+
+def _mel_filterbank(sample_rate: int, n_fft: int) -> np.ndarray:
+    def to_mel(hz):
+        return 2595 * np.log10(1 + hz / 700)
+
+    def to_hz(mel):
+        return 700 * (10 ** (mel / 2595) - 1)
+
+    edges = to_hz(np.linspace(0, to_mel(sample_rate / 2), MEL_FILTERS + 2))
+    bins = np.fft.rfftfreq(n_fft, 1 / sample_rate)
+    bank = np.zeros((MEL_FILTERS, len(bins)))
+    for i in range(MEL_FILTERS):
+        low, centre, high = edges[i : i + 3]
+        rising = (bins - low) / (centre - low)
+        falling = (high - bins) / (high - centre)
+        bank[i] = np.maximum(0, np.minimum(rising, falling))
+    return bank

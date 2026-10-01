@@ -100,3 +100,29 @@ def test_model_axes_can_be_skipped(tmp_path, speech, monkeypatch):
     axes = json.loads((tmp_path / "a_anon.json").read_text())["axes"]
     assert "privacy" not in axes
     assert "content" not in axes
+
+
+def test_thresholds_are_configurable(tmp_path, speech):
+    source = tmp_path / "a.wav"
+    save_wav(source, speech)
+
+    main([
+        "anonymize", str(source), "--seed", "1", "--out-dir", str(tmp_path),
+        "--threshold", "privacy.max_cosine_similarity=2",
+        "--threshold", "clinical.max_relative_deviation:jitter_local_pct=0.5",
+    ])
+
+    axes = json.loads((tmp_path / "a_anon.json").read_text())["axes"]
+    assert axes["privacy"]["thresholds"]["max_cosine_similarity"] == 2.0
+    assert axes["privacy"]["verdict"] is True
+    assert axes["clinical"]["thresholds"]["max_relative_deviation:jitter_local_pct"] == 0.5
+
+
+def test_unknown_threshold_axis_is_rejected(tmp_path, speech, capsys):
+    source = tmp_path / "a.wav"
+    save_wav(source, speech)
+
+    exit_code = main(["anonymize", str(source), "--threshold", "nope.x=1"])
+
+    assert exit_code == 1
+    assert "nope" in capsys.readouterr().err

@@ -35,12 +35,25 @@ class AxisResult:
 class Report:
     axes: dict[str, AxisResult]
     params: Params | None = None
+    models: dict[str, str] = field(default_factory=dict)
     anodio_version: str = field(default_factory=lambda: version("anodio"))
+
+    @property
+    def verdict(self) -> bool | None:
+        """True when every judged Axis passes; None when no Axis is judged."""
+        judged = [axis.verdict for axis in self.axes.values() if axis.verdict is not None]
+        return all(judged) if judged else None
+
+    @property
+    def failures(self) -> list[tuple[str, str]]:
+        return [(name, failure) for name, axis in self.axes.items() for failure in axis.failures]
 
     def to_json(self) -> str:
         return json.dumps(
             {
                 "anodio_version": self.anodio_version,
+                "verdict": self.verdict,
+                "models": self.models,
                 "params": self.params.to_dict() if self.params else None,
                 "axes": {name: axis.to_dict() for name, axis in self.axes.items()},
             },
@@ -54,5 +67,6 @@ class Report:
         return cls(
             axes={name: AxisResult.from_dict(axis) for name, axis in data["axes"].items()},
             params=Params.from_dict(data["params"]) if data["params"] else None,
+            models=data.get("models", {}),
             anodio_version=data["anodio_version"],
         )

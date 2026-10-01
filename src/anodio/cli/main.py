@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from anodio.core import (
+    DEFAULT_THRESHOLDS,
     STAGES,
     AnodioError,
     Params,
@@ -53,6 +54,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_whisper_argument(one)
     _add_params_arguments(one)
+    _add_threshold_argument(one)
 
     download = sub.add_parser(
         "download-models", help="Télécharger les modèles une fois pour toutes (connexion requise)."
@@ -85,6 +87,32 @@ def _add_params_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_threshold_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--threshold",
+        action="append",
+        default=[],
+        metavar="AXE.CLÉ=VALEUR",
+        help="Threshold (répétable), ex. --threshold privacy.max_cosine_similarity=0.3.",
+    )
+
+
+def _thresholds_from_args(args: argparse.Namespace) -> dict[str, dict[str, float]]:
+    thresholds: dict[str, dict[str, float]] = {}
+    for item in args.threshold:
+        name, sep, value = item.partition("=")
+        axis, dot, key = name.strip().partition(".")
+        if not sep or not dot:
+            raise AnodioError(f"Threshold invalide « {item} » : attendu AXE.CLÉ=VALEUR.")
+        if axis not in DEFAULT_THRESHOLDS:
+            raise AnodioError(f"Axe inconnu « {axis} » (choix : {', '.join(DEFAULT_THRESHOLDS)}).")
+        try:
+            thresholds.setdefault(axis, {})[key] = float(value)
+        except ValueError as exc:
+            raise AnodioError(f"Valeur non numérique pour {name} : {value}") from exc
+    return thresholds
+
+
 def _params_from_args(args: argparse.Namespace, seed: int | None) -> Params:
     overrides = {}
     for item in args.set:
@@ -111,17 +139,23 @@ def _anonymize_file(
     out_dir: Path | None,
     embedder: SpeakerEmbedder | None,
     transcriber: Transcriber | None,
+    thresholds: dict[str, dict[str, float]],
 ) -> None:
     original = load_wav(input_path)
     anonymized = anonymize(original, params)
-    report = evaluate(original, anonymized, params=params, embedder=embedder, transcriber=transcriber)
+    report = evaluate(
+        original, anonymized, params=params, thresholds=thresholds, embedder=embedder, transcriber=transcriber
+    )
 
     out_dir = out_dir or input_path.parent
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = f"{input_path.stem}_anon"
     save_wav(out_dir / f"{stem}.wav", anonymized)
     (out_dir / f"{stem}.json").write_text(report.to_json(), encoding="utf-8")
-    print(f"{out_dir / stem}.wav (seed {params.seed})")
+    verdict = {True: "réussi", False: "échec", None: "non jugé"}[report.verdict]
+    print(f"{out_dir / stem}.wav (seed {params.seed}) — verdict global : {verdict}")
+    for axis, failure in report.failures:
+        print(f"  [{axis}] {failure}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -129,9 +163,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "anonymize":
             params = _params_from_args(args, args.seed)
+            thresholds = _thresholds_from_args(args)
             embedder = None if args.no_privacy else load_embedder()
             transcriber = None if args.no_content else load_transcriber(args.whisper_size)
-            _anonymize_file(args.input, params, args.out_dir, embedder, transcriber)
+            _anonymize_file(args.input, params, args.out_dir, embedder, transcriber, thresholds)
         elif args.command == "download-models":
             print(f"Téléchargement des modèles dans {models_dir()}…")
             for path in download_models(whisper_size=args.whisper_size):

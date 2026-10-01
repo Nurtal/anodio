@@ -16,6 +16,8 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QScrollArea,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -28,6 +30,7 @@ from anodio.core import (
     SpeakerEmbedder,
     Transcriber,
     anonymize,
+    apply_thresholds,
     evaluate,
     load_wav,
     save_wav,
@@ -35,6 +38,7 @@ from anodio.core import (
 from anodio.core.models import DEFAULT_WHISPER_SIZE, WHISPER_SIZES, EcapaEmbedder, WhisperTranscriber
 from anodio.gui.params_panel import ParamsPanel
 from anodio.gui.report_view import ReportView
+from anodio.gui.thresholds_panel import ThresholdsPanel
 
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
@@ -71,6 +75,8 @@ class MainWindow(QMainWindow):
         self.export_button.clicked.connect(self.export)
 
         self.results = ReportView()
+        self.thresholds_panel = ThresholdsPanel()
+        self.thresholds_panel.changed.connect(self.rejudge)
         scope = QLabel(
             "La Privacy est évaluée face à un système automatique de vérification du locuteur (ECAPA) "
             "uniquement, pas face à un auditeur humain."
@@ -78,19 +84,37 @@ class MainWindow(QMainWindow):
         scope.setWordWrap(True)
         scope.setStyleSheet("color: gray; font-size: 11px;")
 
-        layout = QVBoxLayout()
-        layout.addWidget(load_button)
-        layout.addWidget(self.file_label)
-        layout.addWidget(self.params_panel)
-        layout.addLayout(models_row)
-        layout.addWidget(self.anonymize_button)
-        layout.addWidget(self.results, 1)
-        layout.addWidget(scope)
-        layout.addWidget(self.export_button)
+        controls = QVBoxLayout()
+        controls.addWidget(load_button)
+        controls.addWidget(self.file_label)
+        controls.addWidget(self.params_panel)
+        controls.addLayout(models_row)
+        controls.addWidget(self.thresholds_panel)
+        controls.addStretch(1)
+        controls_widget = QWidget()
+        controls_widget.setLayout(controls)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(controls_widget)
+
+        left = QVBoxLayout()
+        left.addWidget(scroll, 1)
+        left.addWidget(self.anonymize_button)
+        left.addWidget(self.export_button)
+
+        self.tabs = QTabWidget()
+        self.tabs.addTab(self.results, "Rapport")
+        right = QVBoxLayout()
+        right.addWidget(self.tabs, 1)
+        right.addWidget(scope)
+
+        layout = QHBoxLayout()
+        layout.addLayout(left, 2)
+        layout.addLayout(right, 3)
         central = QWidget()
         central.setLayout(layout)
         self.setCentralWidget(central)
-        self.resize(820, 900)
+        self.resize(1400, 900)
 
     def load(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Charger un enregistrement", "", "Fichiers WAV (*.wav)")
@@ -119,12 +143,22 @@ class MainWindow(QMainWindow):
             transcriber = self.transcriber()
             self.anonymized = anonymize(self.original, params)
             self.report = evaluate(
-                self.original, self.anonymized, params=params, embedder=embedder, transcriber=transcriber
+                self.original,
+                self.anonymized,
+                params=params,
+                thresholds=self.thresholds_panel.thresholds(),
+                embedder=embedder,
+                transcriber=transcriber,
             )
         finally:
             QGuiApplication.restoreOverrideCursor()
         self.export_button.setEnabled(True)
         self.results.show_report(self.report)
+
+    def rejudge(self) -> None:
+        if self.report is not None:
+            self.report = apply_thresholds(self.report, self.thresholds_panel.thresholds())
+            self.results.show_report(self.report)
 
     def embedder(self) -> SpeakerEmbedder | None:
         """The ASV attacker, loaded on first use. Without models, the Privacy Axis is skipped."""

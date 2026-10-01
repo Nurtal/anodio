@@ -38,9 +38,17 @@ CLINICAL_LABELS = {
 VERDICT_TEXT = {True: "✅ réussi", False: "❌ échec", None: "informatif"}
 
 
+INFORMATIONAL_NOTE = (
+    "Les distances Informational (KL, JS, Wasserstein) mesurent à quel point le signal a changé. "
+    "Elles ne prouvent ni la non-réidentifiabilité ni la préservation des Invariants."
+)
+
+
 class ReportView(QWidget):
     def __init__(self) -> None:
         super().__init__()
+        self.overall = QLabel()
+        self.overall.setWordWrap(True)
         self.verdicts = QLabel()
         self.verdicts.setWordWrap(True)
         self.clinical_table = QTableWidget(0, 4)
@@ -63,12 +71,14 @@ class ReportView(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.overall)
         layout.addWidget(self.verdicts)
         layout.addLayout(transcripts)
         layout.addWidget(self.clinical_table, 2)
         layout.addWidget(self.details, 1)
 
     def clear(self) -> None:
+        self.overall.clear()
         self.verdicts.clear()
         self.clinical_table.setRowCount(0)
         self.details.clear()
@@ -76,6 +86,13 @@ class ReportView(QWidget):
         self.transcript_anonymized.clear()
 
     def show_report(self, report: Report) -> None:
+        if report.verdict:
+            self.overall.setText("<h3 style='color:#1e8449'>✅ Résultat utilisable : tous les Axes jugés réussissent.</h3>")
+        else:
+            reasons = "".join(
+                f"<li><b>{AXIS_LABELS.get(axis, axis)}</b> — {failure}</li>" for axis, failure in report.failures
+            )
+            self.overall.setText(f"<h3 style='color:#c0392b'>❌ Résultat non utilisable</h3><ul>{reasons}</ul>")
         self.verdicts.setText(
             "   ".join(f"<b>{AXIS_LABELS.get(n, n)}</b> : {VERDICT_TEXT[a.verdict]}" for n, a in report.axes.items())
         )
@@ -121,8 +138,13 @@ def format_details(report: Report) -> str:
         lines += [f"  {key} : {_fmt(value)}" for key, value in report.params.to_dict().items()]
         lines += [f"  ⚠ {name} hors de sa Safe range" for name in report.params.outside_safe_ranges()]
         lines.append("")
+    if report.models:
+        lines.append("Modèles : " + ", ".join(report.models.values()))
+        lines.append("")
     for name, axis in report.axes.items():
         lines.append(f"{AXIS_LABELS.get(name, name)} : {VERDICT_TEXT[axis.verdict]}")
+        if name == "informational":
+            lines.append(f"  ({INFORMATIONAL_NOTE})")
         lines += [f"  ⚠ {failure}" for failure in axis.failures]
         if name != "clinical":
             lines += [
