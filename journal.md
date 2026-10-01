@@ -42,3 +42,23 @@ Points soumis à ta décision : voir la section « Questions ouvertes » en bas.
 - **README (point 5).** Le vocabulaire suit maintenant le glossaire : Params, Anonymization, Pseudo-voice, Safe range, Stage, Chain. Le terme « déformation » a disparu.
 - **Au passage.** `requires-python` passe de `>=3.11` à `>=3.12`, en cohérence avec le README et mypy.
 
+### Tickets créés pour la suite
+
+Les trois tickets portent le label `ready-for-agent` et sont rattachés comme sous-issues à la spec #1 :
+
+- [#12](https://github.com/Nurtal/anodio/issues/12) : analyser les features sur une copie à 16 kHz. Aujourd'hui, les mesures dépendent de la fréquence d'échantillonnage de l'Original.
+- [#13](https://github.com/Nurtal/anodio/issues/13) : afficher la forme d'onde de l'Original dès le chargement (user story 5).
+- [#14](https://github.com/Nurtal/anodio/issues/14) : nettoyage des code smells : registre de Stages, seuils typés, résultat de Corpus evaluation typé, dédoublonnage, nommage.
+
+### État à la fin de la session
+
+- 204 tests passent dans la suite rapide (les tests lents avec les vrais modèles passaient à la fin de l'implémentation). mypy est propre.
+- Les commits sont sur `main` en local. **Rien n'est poussé** : `origin/main` ne contient que le commit de documentation du début.
+
+## Questions ouvertes (tes décisions)
+
+1. **WER : un ou deux ?** La user story 25 demande « le WER de l'Original, celui de l'Anonymized et leur écart », alors que la spec dit aussi « la transcription de l'Original sert de référence, donc pas de vérité terrain ». Sans vérité terrain, le WER de l'Original est par définition 0. Aujourd'hui, on calcule un seul WER (Anonymized contre Original). Pour avoir les deux, il faudrait pouvoir fournir une transcription de référence, par exemple un `.txt` à côté du `.wav`. Est-ce utile ?
+2. **Les pauses doivent-elles être jugées ?** La spec disait « les statistiques de pauses sont aussi rapportées ». Le code fait aussi échouer la Prosody si les pauses bougent de plus de 20 ms ou si leur nombre change. C'est plus strict que la spec, mais cohérent avec l'Invariant « timing ». On garde ?
+3. **Bas de la Safe range de McAdams.** Avec α ≈ 0,5, j'ai observé une fois un jitter à +77 % et un HNR à −8 dB. Faut-il remonter le plancher (à 0,65 par exemple) au prix d'un peu de Privacy ?
+4. **Validation sur de vrais enregistrements.** Tout a été validé sur des voix synthétiques. Sur ces voix, ECAPA reconnaît encore les Speakers après anonymisation (cosinus de 0,5 à 0,8, EER ignorant de 0 %), ce qui ne dit rien de la Privacy réelle. As-tu un petit corpus français de plusieurs locuteurs pour lancer `anodio evaluate-corpus` ?
+5. **Push.** Veux-tu que je pousse `main` sur GitHub ?
