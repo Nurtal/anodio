@@ -9,6 +9,7 @@ dependencies = [
     "scipy>=1.11",
     "soundfile>=0.12",
     "PySide6>=6.6",
+    "praat-parselmouth>=0.4.7",
 ]
 
 [project.scripts]

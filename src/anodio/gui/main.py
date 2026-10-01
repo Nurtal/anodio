@@ -10,18 +10,17 @@ from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
-    QHBoxLayout,
     QLabel,
     QMainWindow,
     QMessageBox,
     QPushButton,
-    QSpinBox,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
-from anodio.core import AnodioError, Audio, Report, anonymize, draw_params, evaluate, load_wav, random_seed, save_wav
+from anodio.core import AnodioError, Audio, Report, anonymize, evaluate, load_wav, save_wav
+from anodio.gui.params_panel import ParamsPanel
 
 AXIS_LABELS = {"prosody": "Prosodie"}
 
@@ -39,11 +38,7 @@ class MainWindow(QMainWindow):
         load_button = QPushButton("Charger un .wav…")
         load_button.clicked.connect(self.load)
 
-        self.seed_box = QSpinBox()
-        self.seed_box.setRange(0, 2**31 - 1)
-        self.seed_box.setValue(random_seed())
-        random_button = QPushButton("Seed aléatoire")
-        random_button.clicked.connect(lambda: self.seed_box.setValue(random_seed()))
+        self.params_panel = ParamsPanel()
 
         self.anonymize_button = QPushButton("Anonymiser")
         self.anonymize_button.setEnabled(False)
@@ -56,22 +51,17 @@ class MainWindow(QMainWindow):
         self.results = QTextEdit()
         self.results.setReadOnly(True)
 
-        seed_row = QHBoxLayout()
-        seed_row.addWidget(QLabel("Seed :"))
-        seed_row.addWidget(self.seed_box, 1)
-        seed_row.addWidget(random_button)
-
         layout = QVBoxLayout()
         layout.addWidget(load_button)
         layout.addWidget(self.file_label)
-        layout.addLayout(seed_row)
+        layout.addWidget(self.params_panel)
         layout.addWidget(self.anonymize_button)
         layout.addWidget(self.results, 1)
         layout.addWidget(self.export_button)
         central = QWidget()
         central.setLayout(layout)
         self.setCentralWidget(central)
-        self.resize(560, 520)
+        self.resize(720, 760)
 
     def load(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Charger un enregistrement", "", "Fichiers WAV (*.wav)")
@@ -93,7 +83,7 @@ class MainWindow(QMainWindow):
 
     def run_anonymization(self) -> None:
         assert self.original is not None
-        params = draw_params(self.seed_box.value())
+        params = self.params_panel.params()
         QGuiApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             self.anonymized = anonymize(self.original, params)
@@ -119,8 +109,11 @@ def format_report(report: Report) -> str:
     lines = []
     if report.params:
         lines.append("Params")
-        lines += [f"  {key} : {value:.4g}" if isinstance(value, float) else f"  {key} : {value}"
-                  for key, value in report.params.to_dict().items()]
+        lines += [
+            f"  {key} : {value:.4g}" if isinstance(value, float) else f"  {key} : {value}"
+            for key, value in report.params.to_dict().items()
+        ]
+        lines += [f"  ⚠ {name} hors de sa Safe range" for name in report.params.outside_safe_ranges()]
         lines.append("")
     for name, axis in report.axes.items():
         verdict = {True: "✅ réussi", False: "❌ échec", None: "(informatif)"}[axis.verdict]

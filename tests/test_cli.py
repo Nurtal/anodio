@@ -27,3 +27,27 @@ def test_unreadable_input_fails_with_a_message(tmp_path, capsys):
 
     assert exit_code != 0
     assert "broken.wav" in capsys.readouterr().err
+
+
+def test_overrides_and_stages_are_applied(tmp_path, speech):
+    source = tmp_path / "a.wav"
+    save_wav(source, speech)
+
+    exit_code = main([
+        "anonymize", str(source), "--seed", "1", "--out-dir", str(tmp_path),
+        "--set", "pitch_semitones=4", "--stages", "mcadams,psola",
+    ])
+
+    assert exit_code == 0
+    params = json.loads((tmp_path / "a_anon.json").read_text())["params"]
+    assert params["pitch_semitones"] == 4.0
+    assert params["stages"] == ["mcadams", "psola"]
+
+
+def test_out_of_safe_range_override_warns(tmp_path, speech, capsys):
+    source = tmp_path / "a.wav"
+    save_wav(source, speech)
+
+    main(["anonymize", str(source), "--seed", "1", "--out-dir", str(tmp_path), "--set", "pitch_semitones=0.5"])
+
+    assert "pitch_semitones" in capsys.readouterr().err
