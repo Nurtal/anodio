@@ -31,6 +31,20 @@ from anodio.gui.report_view import ReportView
 from anodio.gui.thresholds_panel import ThresholdsPanel
 from anodio.gui.worker import AnonymizationWorker, ModelCache
 
+ABOUT = """<h3>anodio</h3>
+<p>Anonymisation de la voix avec évaluation de la Privacy et de l'utilité.</p>
+<p><b>Limites à garder en tête :</b></p>
+<ul>
+<li>La Privacy est évaluée face à un système automatique de vérification du locuteur (ECAPA)
+uniquement, ni face à un auditeur humain, ni face à un attaquant entraîné sur des voix anonymisées.</li>
+<li>Le choix du traitement du signal (pour préserver les features cliniques) donne une Privacy
+modérée : mesurez-la sur vos données avec <code>anodio evaluate-corpus</code>.</li>
+<li>Une même Seed donne la même pseudo-voix : des enregistrements anonymisés avec une Seed commune
+peuvent être reliés entre eux (Linkability). Gardez les Seeds confidentielles.</li>
+<li>Le seuil cosinus de 0,25 est indicatif et doit être recalibré pour votre langue et votre modèle.</li>
+<li>Le HNR dépend en partie du conduit vocal, que l'anonymisation déplace volontairement.</li>
+</ul>"""
+
 PRIVACY_SCOPE = (
     "La Privacy est évaluée face à un système automatique de vérification du locuteur (ECAPA) "
     "uniquement, pas face à un auditeur humain."
@@ -66,6 +80,8 @@ class MainWindow(QMainWindow):
         self.export_button = QPushButton("Exporter…")
         self.export_button.setEnabled(False)
         self.export_button.clicked.connect(self.export)
+        about_button = QPushButton("À propos et limites…")
+        about_button.clicked.connect(lambda: QMessageBox.about(self, "À propos d'anodio", ABOUT))
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 0)
         self.progress_bar.hide()
@@ -103,6 +119,7 @@ class MainWindow(QMainWindow):
         left.addWidget(self.progress_bar)
         left.addWidget(self.status)
         left.addWidget(self.export_button)
+        left.addWidget(about_button)
 
         self.tabs = QTabWidget()
         self.tabs.addTab(self.results, "Rapport")

@@ -87,6 +87,10 @@ class ParamsPanel(QGroupBox):
         self.seed_box = QSpinBox()
         self.seed_box.setRange(0, 2**31 - 1)
         self.seed_box.setValue(random_seed())
+        self.seed_box.setToolTip(
+            "La même Seed donne la même pseudo-voix : les enregistrements anonymisés avec une Seed "
+            "commune peuvent être reliés entre eux (Linkability). Gardez les Seeds confidentielles."
+        )
         random_button = QPushButton("Seed aléatoire")
         random_button.clicked.connect(lambda: self.seed_box.setValue(random_seed()))
 
