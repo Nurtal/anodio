@@ -42,8 +42,11 @@ def vtln(samples: np.ndarray, sample_rate: int, alpha: float) -> np.ndarray:
 def _warp_lpc_poles(samples: np.ndarray, sample_rate: int, warp) -> np.ndarray:
     """Move the spectral envelope by remapping the angle (in ]0, pi[) of every LPC pole.
 
-    Frame-wise LPC analysis / resynthesis with 50 % overlap-add. The residual
-    (excitation) is kept, so the pulse timing of the voice source is untouched.
+    Frame-wise LPC analysis / resynthesis with 50 % overlap-add. Each resynthesised
+    frame is rescaled to the energy of its input frame: the gain of the warped filter
+    differs from frame to frame, which would otherwise modulate the cycle amplitudes
+    (raising the shimmer). The residual (excitation) is kept, so the pulse timing of
+    the voice source is untouched.
     """
     frame_len = int(FRAME_SECONDS * sample_rate) // 2 * 2
     hop = frame_len // 2
@@ -57,32 +60,42 @@ def _warp_lpc_poles(samples: np.ndarray, sample_rate: int, warp) -> np.ndarray:
         if a is None:
             continue
         residual = lfilter(a, [1.0], frame)
-        poles = np.roots(a)
-        angles = np.angle(poles)
-        complex_ = np.abs(np.imag(poles)) > 1e-12
-        new_poles = poles.copy()
-        # Warp the upper half-plane poles; their conjugates mirror them.
-        upper = complex_ & (angles > 0)
-        lower = complex_ & (angles < 0)
-        new_poles[upper] = np.abs(poles[upper]) * np.exp(1j * np.clip(warp(angles[upper]), 1e-3, np.pi - 1e-3))
-        new_poles[lower] = np.abs(poles[lower]) * np.exp(-1j * np.clip(warp(-angles[lower]), 1e-3, np.pi - 1e-3))
-        new_a = np.real(np.poly(new_poles))
-        output[start : start + frame_len] += lfilter([1.0], new_a, residual) * window
+        synthesized = lfilter([1.0], _warp_polynomial(a, warp), residual)
+        energy = np.sum(synthesized**2)
+        if energy > 0:
+            synthesized *= np.sqrt(np.sum(frame**2) / energy)
+        output[start : start + frame_len] += synthesized * window
     return output[frame_len : frame_len + len(samples)]
 
 
-MIN_F0 = 60.0
-MAX_F0 = 500.0
+def _warp_polynomial(a: np.ndarray, warp) -> np.ndarray:
+    poles = np.roots(a)
+    angles = np.angle(poles)
+    complex_ = np.abs(np.imag(poles)) > 1e-12
+    new_poles = poles.copy()
+    # Warp the upper half-plane poles; their conjugates mirror them.
+    upper = complex_ & (angles > 0)
+    lower = complex_ & (angles < 0)
+    new_poles[upper] = np.abs(poles[upper]) * np.exp(1j * np.clip(warp(angles[upper]), 1e-3, np.pi - 1e-3))
+    new_poles[lower] = np.abs(poles[lower]) * np.exp(-1j * np.clip(warp(-angles[lower]), 1e-3, np.pi - 1e-3))
+    return np.real(np.poly(new_poles))
+
+
 UNVOICED_HOP_SECONDS = 0.01
 MAX_VOICED_GAP_SECONDS = 0.02
+# Larger cycle-to-cycle deviations are pulse-detection errors (Praat's period factor is 1.3).
+MAX_PERIOD_DEVIATION = 0.15
+MAX_AMPLITUDE_DEVIATION = 0.5
 
 
 def _glottal_pulses(samples: np.ndarray, sample_rate: int) -> np.ndarray:
     import parselmouth
     from parselmouth.praat import call
 
+    from anodio.core.features import pitch_range
+
     sound = parselmouth.Sound(samples.astype(np.float64), sample_rate)
-    point_process = call(sound, "To PointProcess (periodic, cc)", MIN_F0, MAX_F0)
+    point_process = call(sound, "To PointProcess (periodic, cc)", *pitch_range(sound))
     n = call(point_process, "Get number of points")
     return np.array([call(point_process, "Get time from index", i) for i in range(1, n + 1)])
 
@@ -128,6 +141,8 @@ def psola(
         smooth_period, period_dev = _relative_deviations(periods)
         amplitudes = np.array([_peak(x, t, p, sample_rate) for t, p in zip(run[:-1], periods)])
         smooth_amp, amp_dev = _relative_deviations(np.maximum(amplitudes, 1e-9))
+        period_pool = _plausible(period_dev, MAX_PERIOD_DEVIATION)
+        amp_pool = _plausible(amp_dev, MAX_AMPLITUDE_DEVIATION)
         start, end = run[0], run[-1]
         voiced_spans.append((start, end))
         t = start
@@ -136,9 +151,9 @@ def psola(
             j = j if j == 0 or abs(run[j] - t) <= abs(run[j - 1] - t) else j - 1
             j = min(j, len(periods) - 1)
             left = periods[j - 1] if j > 0 else periods[j]
-            gain = (1 + rng.choice(amp_dev)) / (1 + amp_dev[j])
+            gain = (1 + rng.choice(amp_pool)) / (1 + amp_dev[j])
             grains.append((t, run[j], left, periods[j], gain))
-            t += smooth_period[j] / pitch_ratio * (1 + rng.choice(period_dev))
+            t += smooth_period[j] / pitch_ratio * (1 + rng.choice(period_pool))
     hop = UNVOICED_HOP_SECONDS
     margin = MAX_VOICED_GAP_SECONDS / 2
     for t in np.arange(0.0, n / sample_rate + hop, hop):
@@ -156,6 +171,12 @@ def psola(
         if hi > lo:
             output[lo:hi] += gain * grain[lo - begin : hi - begin]
     return _match_envelope(output, x, sample_rate)
+
+
+def _plausible(deviations: np.ndarray, limit: float) -> np.ndarray:
+    """Deviations to draw from, without pulse-detection errors (which Praat's jitter also ignores)."""
+    kept = deviations[np.abs(deviations) < limit]
+    return kept if len(kept) else np.zeros(1)
 
 
 def _peak(x: np.ndarray, t: float, period: float, sample_rate: int) -> float:

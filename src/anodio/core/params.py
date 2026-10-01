@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass
 import numpy as np
 
 # Stages of the Chain, in application order.
-STAGES: tuple[str, ...] = ("mcadams", "psola", "vtln")
+STAGES: tuple[str, ...] = ("psola", "mcadams", "vtln")
 
 # Intervals in which each Param is drawn from the Seed. The gaps around the
 # identity exclude values too weak to anonymize.

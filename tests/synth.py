@@ -26,11 +26,13 @@ def voiced_segment(
     vibrato_semitones: float = 1.0,
     seed: int = 0,
     formants=FORMANTS_HZ,
+    syllable_rate: float = 0.0,
 ) -> np.ndarray:
     """Glottal pulse train through formant resonators.
 
     `jitter` / `shimmer` are the relative standard deviations of consecutive
-    period lengths / pulse amplitudes.
+    period lengths / pulse amplitudes. `syllable_rate` (Hz) dips the amplitude
+    between syllable nuclei, as in connected speech.
     """
     rng = np.random.default_rng(seed)
     n = int(duration * sample_rate)
@@ -53,6 +55,9 @@ def voiced_segment(
     envelope = np.ones(n)
     envelope[:ramp] = np.linspace(0, 1, ramp)
     envelope[n - ramp :] = np.linspace(1, 0, ramp)
+    if syllable_rate:
+        t = np.arange(n) / sample_rate
+        envelope *= 1 - 0.8 * (0.5 + 0.5 * np.cos(2 * np.pi * syllable_rate * t))
     signal = signal * envelope
     return signal / np.max(np.abs(signal))
 
@@ -62,11 +67,24 @@ UTTERANCE_SEGMENTS = ((0.3, 1.1), (1.5, 2.1))
 UTTERANCE_DURATION = 2.4
 
 
-def utterance(sample_rate: int = 16000, f0: float = 120.0, seed: int = 0, **kwargs) -> Audio:
-    """Voiced / silent / voiced, framed by silence."""
-    samples = np.zeros(int(UTTERANCE_DURATION * sample_rate))
-    for i, (start, end) in enumerate(UTTERANCE_SEGMENTS):
+def utterance(
+    sample_rate: int = 16000,
+    f0: float = 120.0,
+    seed: int = 0,
+    segments=UTTERANCE_SEGMENTS,
+    duration: float = UTTERANCE_DURATION,
+    **kwargs,
+) -> Audio:
+    """Voiced segments separated and framed by silence (by default voiced / silent / voiced)."""
+    samples = np.zeros(int(duration * sample_rate))
+    for i, (start, end) in enumerate(segments):
         seg = voiced_segment(end - start, sample_rate, f0=f0, seed=seed + i, **kwargs)
         s = int(start * sample_rate)
         samples[s : s + len(seg)] = 0.5 * seg
     return Audio(samples.astype(np.float32), sample_rate)
+
+
+def long_utterance(**kwargs) -> Audio:
+    """About 10 s: eight voiced stretches of 1 s separated by 0.25 s pauses."""
+    segments = tuple((0.3 + 1.25 * i, 1.3 + 1.25 * i) for i in range(8))
+    return utterance(segments=segments, duration=segments[-1][1] + 0.3, **kwargs)

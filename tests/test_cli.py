@@ -41,7 +41,7 @@ def test_overrides_and_stages_are_applied(tmp_path, speech):
     assert exit_code == 0
     params = json.loads((tmp_path / "a_anon.json").read_text())["params"]
     assert params["pitch_semitones"] == 4.0
-    assert params["stages"] == ["mcadams", "psola"]
+    assert params["stages"] == ["psola", "mcadams"]  # always in Chain order
 
 
 def test_out_of_safe_range_override_warns(tmp_path, speech, capsys):

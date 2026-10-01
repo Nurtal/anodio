@@ -14,16 +14,13 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
 from anodio.core import AnodioError, Audio, Report, anonymize, evaluate, load_wav, save_wav
 from anodio.gui.params_panel import ParamsPanel
-
-AXIS_LABELS = {"prosody": "Prosodie"}
-
+from anodio.gui.report_view import ReportView
 
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
@@ -48,8 +45,7 @@ class MainWindow(QMainWindow):
         self.export_button.setEnabled(False)
         self.export_button.clicked.connect(self.export)
 
-        self.results = QTextEdit()
-        self.results.setReadOnly(True)
+        self.results = ReportView()
 
         layout = QVBoxLayout()
         layout.addWidget(load_button)
@@ -61,7 +57,7 @@ class MainWindow(QMainWindow):
         central = QWidget()
         central.setLayout(layout)
         self.setCentralWidget(central)
-        self.resize(720, 760)
+        self.resize(820, 900)
 
     def load(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Charger un enregistrement", "", "Fichiers WAV (*.wav)")
@@ -91,7 +87,7 @@ class MainWindow(QMainWindow):
         finally:
             QGuiApplication.restoreOverrideCursor()
         self.export_button.setEnabled(True)
-        self.results.setPlainText(format_report(self.report))
+        self.results.show_report(self.report)
 
     def export(self) -> None:
         assert self.anonymized is not None and self.report is not None and self.original_path is not None
@@ -103,25 +99,6 @@ class MainWindow(QMainWindow):
         save_wav(wav_path, self.anonymized)
         wav_path.with_suffix(".json").write_text(self.report.to_json(), encoding="utf-8")
         QMessageBox.information(self, "Export", f"Exporté :\n{wav_path}\n{wav_path.with_suffix('.json')}")
-
-
-def format_report(report: Report) -> str:
-    lines = []
-    if report.params:
-        lines.append("Params")
-        lines += [
-            f"  {key} : {value:.4g}" if isinstance(value, float) else f"  {key} : {value}"
-            for key, value in report.params.to_dict().items()
-        ]
-        lines += [f"  ⚠ {name} hors de sa Safe range" for name in report.params.outside_safe_ranges()]
-        lines.append("")
-    for name, axis in report.axes.items():
-        verdict = {True: "✅ réussi", False: "❌ échec", None: "(informatif)"}[axis.verdict]
-        lines.append(f"{AXIS_LABELS.get(name, name)} : {verdict}")
-        lines += [f"  {key} : {value}" for key, value in axis.measures.items()]
-        lines += [f"  ⚠ {failure}" for failure in axis.failures]
-        lines.append("")
-    return "\n".join(lines)
 
 
 def main() -> int:
