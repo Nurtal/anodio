@@ -108,3 +108,24 @@ def test_analysis_is_not_serialized_nor_compared(report):
 
 def test_rejudging_keeps_the_analysis(report):
     assert apply_thresholds(report, {}).analysis is report.analysis
+
+
+def test_overall_verdict_fails_when_a_required_axis_was_not_evaluated(speech):
+    lenient = {
+        "clinical": {"max_relative_deviation": 100.0, "max_relative_deviation:shimmer_local_pct": 100.0,
+                     "max_absolute_deviation:hnr_db": 100.0},
+        "prosody": {"min_f0_correlation": -1.0},
+    }
+
+    report = evaluate(speech, speech, thresholds=lenient)  # no embedder, no transcriber
+
+    assert all(axis.verdict is not False for axis in report.axes.values())
+    assert report.verdict is False
+    assert {axis for axis, _ in report.failures} == {"privacy", "content"}
+
+
+def test_missing_axes_survive_the_json_round_trip(speech):
+    report = evaluate(speech, speech)
+
+    assert Report.from_json(report.to_json()).verdict is False
+    assert json.loads(report.to_json())["missing_axes"] == ["privacy", "content"]

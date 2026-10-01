@@ -14,6 +14,9 @@ if TYPE_CHECKING:
 
 Measure = float | int | str | None
 
+# Axes that must be present and pass for a Report to be usable.
+REQUIRED_AXES = ("privacy", "content", "prosody", "clinical")
+
 
 @dataclass
 class AxisResult:
@@ -45,20 +48,27 @@ class Report:
     analysis: Analysis | None = field(default=None, compare=False, repr=False)
 
     @property
-    def verdict(self) -> bool | None:
-        """True when every judged Axis passes; None when no Axis is judged."""
+    def missing_axes(self) -> list[str]:
+        """Required Axes that were not evaluated (model missing or disabled)."""
+        return [name for name in REQUIRED_AXES if name not in self.axes]
+
+    @property
+    def verdict(self) -> bool:
+        """True only when every required Axis was evaluated and every judged Axis passes."""
         judged = [axis.verdict for axis in self.axes.values() if axis.verdict is not None]
-        return all(judged) if judged else None
+        return not self.missing_axes and all(judged)
 
     @property
     def failures(self) -> list[tuple[str, str]]:
-        return [(name, failure) for name, axis in self.axes.items() for failure in axis.failures]
+        missing = [(name, "Axe non évalué (modèle absent ou désactivé).") for name in self.missing_axes]
+        return missing + [(name, failure) for name, axis in self.axes.items() for failure in axis.failures]
 
     def to_json(self) -> str:
         return json.dumps(
             {
                 "anodio_version": self.anodio_version,
                 "verdict": self.verdict,
+                "missing_axes": self.missing_axes,
                 "models": self.models,
                 "params": self.params.to_dict() if self.params else None,
                 "axes": {name: axis.to_dict() for name, axis in self.axes.items()},

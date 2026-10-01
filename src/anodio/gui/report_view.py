@@ -93,9 +93,9 @@ class ReportView(QWidget):
                 f"<li><b>{AXIS_LABELS.get(axis, axis)}</b> — {failure}</li>" for axis, failure in report.failures
             )
             self.overall.setText(f"<h3 style='color:#c0392b'>❌ Résultat non utilisable</h3><ul>{reasons}</ul>")
-        self.verdicts.setText(
-            "   ".join(f"<b>{AXIS_LABELS.get(n, n)}</b> : {VERDICT_TEXT[a.verdict]}" for n, a in report.axes.items())
-        )
+        verdicts = [f"<b>{AXIS_LABELS.get(n, n)}</b> : {VERDICT_TEXT[a.verdict]}" for n, a in report.axes.items()]
+        verdicts += [f"<b>{AXIS_LABELS.get(n, n)}</b> : ⚠ non évalué" for n in report.missing_axes]
+        self.verdicts.setText("   ".join(verdicts))
         self._fill_clinical(report)
         content = report.axes.get("content")
         self.transcript_original.setPlainText(str(content.measures["transcript_original"]) if content else "—")
