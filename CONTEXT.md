@@ -93,8 +93,11 @@ La réussite ou l'échec d'un Axis, obtenu en comparant ses mesures à son Thres
 L'adversaire visé : un système automatique de vérification du locuteur qui ne connaît pas l'Anonymizer. Un auditeur humain et un attaquant entraîné sur des voix anonymisées sont hors périmètre.
 _Avoid_ : pirate, adversaire (sans préciser)
 
+**Ignorant attack** :
+Une condition de Corpus evaluation où l'ASV attacker enrôle des Originaux et les compare à des versions Anonymized d'*autres* enregistrements : il ignore l'Anonymization.
+
 **Lazy-informed attack** :
-Une évaluation où l'ASV attacker compare la version Anonymized d'un enregistrement à l'Original d'un *autre* enregistrement du même Speaker.
+Une condition de Corpus evaluation où l'ASV attacker connaît l'Anonymizer mais pas la Seed : il anonymise lui-même ses enregistrements d'enrôlement avec sa propre Seed, puis les compare aux versions Anonymized d'*autres* enregistrements.
 
 **Linkability** (reliabilité) :
 La possibilité de déterminer que deux versions Anonymized proviennent du même Speaker. Une Seed partagée rend la Linkability volontaire.

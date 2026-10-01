@@ -2,6 +2,7 @@
 
     anodio anonymize <fichier.wav> [--seed N] ...
     anodio batch <dossier> --out-dir <sortie> [--seed N | --seed-map seeds.csv] ...
+    anodio evaluate-corpus <dossier> [--seed N | --seed-map seeds.csv] [--output eval.json] ...
     anodio download-models
 """
 
@@ -24,6 +25,7 @@ from anodio.core import (
     Transcriber,
     anonymize,
     draw_params,
+    evaluate_corpus,
     evaluate,
     load_wav,
     random_seed,
@@ -81,6 +83,19 @@ def _build_parser() -> argparse.ArgumentParser:
     batch.add_argument("--seed", type=int, default=None, help="Seed commune (ou de repli avec --seed-map).")
     batch.add_argument("--seed-map", type=Path, default=None, help="CSV « speaker,seed » : une Seed par Speaker.")
     _add_processing_arguments(batch)
+
+    corpus = sub.add_parser(
+        "evaluate-corpus",
+        help="Corpus evaluation : EER de l'ASV attacker (original, ignorant, lazy-informed) et agrégats d'utilité.",
+    )
+    corpus.add_argument("input", type=Path, help="Dossier du corpus (corpus/<speaker>/*.wav), au moins 2 Speakers.")
+    corpus.add_argument("--seed", type=int, default=None, help="Seed commune (ou de repli avec --seed-map).")
+    corpus.add_argument("--seed-map", type=Path, default=None, help="CSV « speaker,seed » : une Seed par Speaker.")
+    corpus.add_argument(
+        "--attacker-seed", type=int, default=None, help="Seed de l'attaquant lazy-informed (tirée au hasard si absente)."
+    )
+    corpus.add_argument("--output", type=Path, default=None, help="Fichier JSON de résultats (sinon : sortie standard).")
+    _add_processing_arguments(corpus)
 
     download = sub.add_parser(
         "download-models", help="Télécharger les modèles une fois pour toutes (connexion requise)."
@@ -247,6 +262,45 @@ def _anonymize_batch(args: argparse.Namespace) -> int:
     return 2 if failed else 0
 
 
+def _evaluate_corpus(args: argparse.Namespace) -> int:
+    if not args.input.is_dir():
+        raise AnodioError(f"Dossier introuvable : {args.input}")
+    if args.no_privacy:
+        raise AnodioError("La Corpus evaluation mesure la Privacy : --no-privacy n'a pas de sens ici.")
+    seed_map = _read_seed_map(args.seed_map) if args.seed_map else {}
+    fallback_seed = args.seed if args.seed is not None else (None if seed_map else random_seed())
+    recordings = []
+    for path in sorted(args.input.rglob("*.wav")):
+        speaker = _speaker(args.input, path)
+        if speaker not in seed_map and fallback_seed is None:
+            raise AnodioError(f"Le Speaker « {speaker} » n'a pas de Seed dans {args.seed_map}.")
+        recordings.append((speaker, load_wav(path)))
+    processing = _processing_from_args(args)
+    assert processing.embedder is not None
+    attacker_seed = args.attacker_seed if args.attacker_seed is not None else random_seed()
+    try:
+        result = evaluate_corpus(
+            recordings,
+            params_for=lambda speaker: processing.params(seed_map.get(speaker, fallback_seed)),  # type: ignore[arg-type]
+            attacker_seed=attacker_seed,
+            embedder=processing.embedder,
+            transcriber=processing.transcriber,
+            thresholds=processing.thresholds,
+            on_progress=lambda done, total: print(f"\r{done}/{total} enregistrements", end="", file=sys.stderr),
+        )
+    except ValueError as exc:
+        raise AnodioError(str(exc)) from exc
+    print(file=sys.stderr)
+    text = json.dumps(result, indent=2, ensure_ascii=False)
+    if args.output:
+        args.output.write_text(text, encoding="utf-8")
+        for condition, values in result["privacy"].items():
+            print(f"EER {condition} : {100 * values['eer']:.1f} %")
+    else:
+        print(text)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     try:
@@ -254,6 +308,8 @@ def main(argv: list[str] | None = None) -> int:
             return _anonymize_one(args)
         if args.command == "batch":
             return _anonymize_batch(args)
+        if args.command == "evaluate-corpus":
+            return _evaluate_corpus(args)
         if args.command == "download-models":
             print(f"Téléchargement des modèles dans {models_dir()}…")
             for path in download_models(whisper_size=args.whisper_size):

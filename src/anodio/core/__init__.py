@@ -2,6 +2,7 @@
 
 from anodio.core.anonymize import Anonymizer, anonymize, chain
 from anodio.core.audio import AnodioError, Audio, load_wav, save_wav
+from anodio.core.corpus import equal_error_rate, evaluate_corpus
 from anodio.core.evaluate import DEFAULT_THRESHOLDS, apply_thresholds, evaluate
 from anodio.core.models import ModelsMissingError, SpeakerEmbedder, Transcriber
 from anodio.core.params import IDENTITY, SAFE_RANGES, STAGES, Params, draw_params, random_seed
@@ -25,6 +26,8 @@ __all__ = [
     "anonymize",
     "apply_thresholds",
     "draw_params",
+    "equal_error_rate",
+    "evaluate_corpus",
     "evaluate",
     "load_wav",
     "random_seed",
