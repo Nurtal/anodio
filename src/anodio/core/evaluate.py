@@ -7,12 +7,15 @@ import math
 import numpy as np
 
 from anodio.core.audio import Audio
+from anodio.core.models import SpeakerEmbedder
 from anodio.core.features import clinical_features, energy_db, energy_dtw_db, f0_contour, f0_correlation
 from anodio.core.params import Params
 from anodio.core.report import AxisResult, Measure, Report
 from anodio.core.timing import pauses
 
 DEFAULT_THRESHOLDS: dict[str, dict[str, float]] = {
+    # Indicative ECAPA decision threshold: recalibrate it with a Corpus evaluation.
+    "privacy": {"max_cosine_similarity": 0.25},
     "prosody": {"max_pause_boundary_error_ms": 20.0, "min_f0_correlation": 0.9},
     # Per-feature limits override the default "max_relative_deviation". The HNR is in dB and
     # partly depends on the vocal tract (which the Anonymization moves on purpose), so it is
@@ -30,16 +33,34 @@ def evaluate(
     anonymized: Audio,
     params: Params | None = None,
     thresholds: dict[str, dict[str, float]] | None = None,
+    embedder: SpeakerEmbedder | None = None,
 ) -> Report:
+    """Measure each Axis. Without an `embedder`, the Privacy Axis is left out."""
     merged = {axis: {**values, **(thresholds or {}).get(axis, {})} for axis, values in DEFAULT_THRESHOLDS.items()}
     contour_o, contour_a = f0_contour(original), f0_contour(anonymized)
-    return Report(
-        axes={
-            "prosody": _prosody(original, anonymized, contour_o, contour_a, merged["prosody"]),
-            "clinical": _clinical(original, anonymized, contour_o, contour_a, merged["clinical"]),
-        },
-        params=params,
-    )
+    axes = {}
+    if embedder is not None:
+        axes["privacy"] = _privacy(original, anonymized, embedder, merged["privacy"])
+    axes["prosody"] = _prosody(original, anonymized, contour_o, contour_a, merged["prosody"])
+    axes["clinical"] = _clinical(original, anonymized, contour_o, contour_a, merged["clinical"])
+    return Report(axes=axes, params=params)
+
+
+def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
+    return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-12))
+
+
+def _privacy(original, anonymized, embedder: SpeakerEmbedder, thresholds: dict[str, float]) -> AxisResult:
+    similarity = cosine_similarity(embedder.embed(original), embedder.embed(anonymized))
+    limit = thresholds["max_cosine_similarity"]
+    failures = []
+    if similarity >= limit:
+        failures.append(
+            f"L'ASV attacker relie encore la voix au Speaker : similarité cosinus de {similarity:.2f} "
+            f"(seuil : {limit:.2f})."
+        )
+    measures: dict[str, Measure] = {"cosine_similarity": similarity, "embedder": embedder.name}
+    return AxisResult(measures, dict(thresholds), verdict=not failures, failures=failures)
 
 
 def _prosody(original, anonymized, contour_o, contour_a, thresholds: dict[str, float]) -> AxisResult:

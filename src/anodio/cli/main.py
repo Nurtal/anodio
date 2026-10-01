@@ -10,6 +10,7 @@ from anodio.core import (
     STAGES,
     AnodioError,
     Params,
+    SpeakerEmbedder,
     anonymize,
     draw_params,
     evaluate,
@@ -17,6 +18,10 @@ from anodio.core import (
     random_seed,
     save_wav,
 )
+from anodio.core.models import EcapaEmbedder, download_models, models_dir
+
+# Factory of the ASV attacker; replaced by a fake in the tests.
+load_embedder = EcapaEmbedder
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -27,7 +32,14 @@ def _build_parser() -> argparse.ArgumentParser:
     one.add_argument("input", type=Path, help="Fichier .wav original.")
     one.add_argument("--seed", type=int, default=None, help="Seed (tirée au hasard si absente).")
     one.add_argument("--out-dir", type=Path, default=None, help="Dossier de sortie (par défaut : celui de l'original).")
+    one.add_argument(
+        "--no-privacy",
+        action="store_true",
+        help="Ne pas évaluer la Privacy (aucun modèle n'est alors nécessaire).",
+    )
     _add_params_arguments(one)
+
+    sub.add_parser("download-models", help="Télécharger les modèles une fois pour toutes (connexion requise).")
     return parser
 
 
@@ -66,10 +78,12 @@ def _params_from_args(args: argparse.Namespace, seed: int | None) -> Params:
     return params
 
 
-def _anonymize_file(input_path: Path, params: Params, out_dir: Path | None) -> None:
+def _anonymize_file(
+    input_path: Path, params: Params, out_dir: Path | None, embedder: SpeakerEmbedder | None
+) -> None:
     original = load_wav(input_path)
     anonymized = anonymize(original, params)
-    report = evaluate(original, anonymized, params=params)
+    report = evaluate(original, anonymized, params=params, embedder=embedder)
 
     out_dir = out_dir or input_path.parent
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -83,7 +97,13 @@ def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     try:
         if args.command == "anonymize":
-            _anonymize_file(args.input, _params_from_args(args, args.seed), args.out_dir)
+            params = _params_from_args(args, args.seed)
+            embedder = None if args.no_privacy else load_embedder()
+            _anonymize_file(args.input, params, args.out_dir, embedder)
+        elif args.command == "download-models":
+            print(f"Téléchargement des modèles dans {models_dir()}…")
+            for path in download_models():
+                print(f"  {path}")
     except AnodioError as exc:
         print(f"Erreur : {exc}", file=sys.stderr)
         return 1

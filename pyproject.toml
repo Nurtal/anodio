@@ -10,6 +10,10 @@ dependencies = [
     "soundfile>=0.12",
     "PySide6>=6.6",
     "praat-parselmouth>=0.4.7",
+    "torch>=2.14.1",
+    "torchaudio>=2.11.0",
+    "speechbrain>=1.1.1",
+    "huggingface-hub>=2.1.1",
 ]
 
 [project.scripts]
@@ -32,3 +36,12 @@ addopts = "-m 'not slow'"
 python_version = "3.12"
 ignore_missing_imports = true
 check_untyped_defs = true
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+torchaudio = { index = "pytorch-cpu" }

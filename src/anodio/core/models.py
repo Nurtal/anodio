@@ -1,0 +1,78 @@
+"""Access to the pretrained models, behind small injectable interfaces.
+
+Models are downloaded once (`anodio download-models`) into a local cache, then
+loaded from disk only: no network access at run time.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Protocol
+
+import numpy as np
+from scipy.signal import resample_poly
+
+from anodio.core.audio import AnodioError, Audio
+
+MODEL_SAMPLE_RATE = 16000
+ECAPA_REPO = "speechbrain/spkrec-ecapa-voxceleb"
+
+
+class ModelsMissingError(AnodioError):
+    pass
+
+
+class SpeakerEmbedder(Protocol):
+    name: str
+
+    def embed(self, audio: Audio) -> np.ndarray: ...
+
+
+def models_dir() -> Path:
+    default = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "anodio" / "models"
+    return Path(os.environ.get("ANODIO_MODELS_DIR", default))
+
+
+def _require(path: Path, what: str) -> Path:
+    if not path.exists() or not any(path.iterdir()):
+        raise ModelsMissingError(
+            f"Le modèle {what} est absent de {path}. Lancez une fois « anodio download-models » "
+            "(connexion requise), puis anodio fonctionne hors ligne."
+        )
+    return path
+
+
+def to_model_rate(audio: Audio) -> np.ndarray:
+    if audio.sample_rate == MODEL_SAMPLE_RATE:
+        return audio.samples.astype(np.float32)
+    divisor = np.gcd(MODEL_SAMPLE_RATE, audio.sample_rate)
+    return resample_poly(audio.samples, MODEL_SAMPLE_RATE // divisor, audio.sample_rate // divisor).astype(np.float32)
+
+
+class EcapaEmbedder:
+    """SpeechBrain ECAPA-TDNN trained on VoxCeleb: the ASV attacker of the Privacy Axis."""
+
+    name = ECAPA_REPO
+
+    def __init__(self) -> None:
+        path = _require(models_dir() / "ecapa", "ECAPA (vérification du locuteur)")
+        from speechbrain.inference.speaker import EncoderClassifier
+
+        self._model = EncoderClassifier.from_hparams(source=str(path), savedir=str(path), run_opts={"device": "cpu"})
+
+    def embed(self, audio: Audio) -> np.ndarray:
+        import torch
+
+        with torch.no_grad():
+            embedding = self._model.encode_batch(torch.from_numpy(to_model_rate(audio))[None, :])
+        return embedding.squeeze().numpy()
+
+
+def download_models(target: Path | None = None) -> list[Path]:
+    """Fetch every model into the local cache. The only step that needs a network connection."""
+    from huggingface_hub import snapshot_download
+
+    target = target or models_dir()
+    ecapa = Path(snapshot_download(ECAPA_REPO, local_dir=target / "ecapa"))
+    return [ecapa]

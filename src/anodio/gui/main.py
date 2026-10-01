@@ -18,7 +18,18 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from anodio.core import AnodioError, Audio, Report, anonymize, evaluate, load_wav, save_wav
+from anodio.core import (
+    AnodioError,
+    Audio,
+    ModelsMissingError,
+    Report,
+    SpeakerEmbedder,
+    anonymize,
+    evaluate,
+    load_wav,
+    save_wav,
+)
+from anodio.core.models import EcapaEmbedder
 from anodio.gui.params_panel import ParamsPanel
 from anodio.gui.report_view import ReportView
 
@@ -30,6 +41,7 @@ class MainWindow(QMainWindow):
         self.original_path: Path | None = None
         self.anonymized: Audio | None = None
         self.report: Report | None = None
+        self._embedder: SpeakerEmbedder | None = None
 
         self.file_label = QLabel("Aucun fichier chargé.")
         load_button = QPushButton("Charger un .wav…")
@@ -46,6 +58,12 @@ class MainWindow(QMainWindow):
         self.export_button.clicked.connect(self.export)
 
         self.results = ReportView()
+        scope = QLabel(
+            "La Privacy est évaluée face à un système automatique de vérification du locuteur (ECAPA) "
+            "uniquement, pas face à un auditeur humain."
+        )
+        scope.setWordWrap(True)
+        scope.setStyleSheet("color: gray; font-size: 11px;")
 
         layout = QVBoxLayout()
         layout.addWidget(load_button)
@@ -53,6 +71,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.params_panel)
         layout.addWidget(self.anonymize_button)
         layout.addWidget(self.results, 1)
+        layout.addWidget(scope)
         layout.addWidget(self.export_button)
         central = QWidget()
         central.setLayout(layout)
@@ -82,12 +101,24 @@ class MainWindow(QMainWindow):
         params = self.params_panel.params()
         QGuiApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
+            embedder = self.embedder()
             self.anonymized = anonymize(self.original, params)
-            self.report = evaluate(self.original, self.anonymized, params=params)
+            self.report = evaluate(self.original, self.anonymized, params=params, embedder=embedder)
         finally:
             QGuiApplication.restoreOverrideCursor()
         self.export_button.setEnabled(True)
         self.results.show_report(self.report)
+
+    def embedder(self) -> SpeakerEmbedder | None:
+        """The ASV attacker, loaded on first use. Without models, the Privacy Axis is skipped."""
+        if self._embedder is None:
+            try:
+                self._embedder = EcapaEmbedder()
+            except ModelsMissingError as exc:
+                QGuiApplication.restoreOverrideCursor()
+                QMessageBox.warning(self, "Privacy non évaluée", str(exc))
+                QGuiApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        return self._embedder
 
     def export(self) -> None:
         assert self.anonymized is not None and self.report is not None and self.original_path is not None
