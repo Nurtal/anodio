@@ -32,3 +32,13 @@ Points soumis à ta décision : voir la section « Questions ouvertes » en bas.
   - `anodio batch` attrape désormais toute exception par fichier, l'inscrit dans `summary.json` (« Erreur inattendue : … ») et passe au fichier suivant.
 - **Tests.** Trois nouveaux tests : un fichier trop court est refusé, un fichier trop court est signalé sans interrompre le lot, une exception arbitraire sur un fichier n'interrompt pas le lot. Deux anciens tests d'I/O utilisaient des signaux de 0,05 et 0,1 s ; je les ai allongés à 1 s sans changer ce qu'ils vérifient.
 
+### 3 à 6. Seuil de WER, ADR, glossaire, README — corrigés
+
+- **Seuil de WER strict (point 6).** Le seuil passe de `wer > 0,05` à `wer >= 0,05`, conformément à la spec (« inférieure à 5 points »). Un nouveau test vérifie qu'un WER d'exactement 5 % (1 erreur sur 20 mots) échoue. Le README indique désormais « < 5 % ».
+- **ADR 0001 (point 3).** L'ordre de la Chain est corrigé (PSOLA, puis McAdams, puis VTLN). J'ai ajouté une section « Mise en œuvre » qui explique pourquoi le PSOLA passe en premier et pourquoi c'est une implémentation maison plutôt que le « Change gender » de Praat, chiffres à l'appui.
+- **Glossaire (point 4).**
+  - La définition de l'ASV attacker ne dit plus qu'il « ne connaît pas l'Anonymizer » : elle renvoie aux conditions Ignorant et Lazy-informed.
+  - Nouvelle entrée **Baseline** (condition de référence). La clé JSON correspondante de `evaluate-corpus` passe de `original` à `baseline`. ⚠️ Ce renommage casse le format de sortie, sans conséquence puisque rien n'est encore publié.
+- **README (point 5).** Le vocabulaire suit maintenant le glossaire : Params, Anonymization, Pseudo-voice, Safe range, Stage, Chain. Le terme « déformation » a disparu.
+- **Au passage.** `requires-python` passe de `>=3.11` à `>=3.12`, en cohérence avec le README et mypy.
+

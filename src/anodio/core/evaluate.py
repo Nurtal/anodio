@@ -153,7 +153,7 @@ def _judge_content(m: Measures, t: dict[str, float]) -> list[str]:
     wer = m["wer"]
     if wer is None:
         return ["Aucune parole reconnue dans l'original : le contenu ne peut pas être comparé."]
-    if float(wer) > t["max_wer"]:
+    if float(wer) >= t["max_wer"]:
         return [f"WER de {100 * float(wer):.0f} % par rapport à l'original (seuil : {100 * t['max_wer']:.0f} %)."]
     return []
 

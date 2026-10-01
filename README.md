@@ -24,7 +24,7 @@ uv run anodio-gui
 ```
 
 1. **Charger un .wav.** Les fichiers stéréo sont convertis en mono, et toutes les fréquences d'échantillonnage sont acceptées.
-2. **Choisir une Seed.** La Seed détermine les paramètres de la déformation, donc la pseudo-voix. Chaque curseur est verrouillé sur la Seed. En décochant « Seed », on impose une valeur manuelle (un Override), et un avertissement s'affiche si elle sort de la plage sûre. Chaque étape de la chaîne peut être désactivée.
+2. **Choisir une Seed.** La Seed détermine les Params de l'Anonymization, donc la Pseudo-voice. Chaque curseur est verrouillé sur la Seed. En décochant « Seed », on impose une valeur manuelle (un Override), et un avertissement s'affiche si elle sort de sa Safe range. Chaque Stage de la Chain peut être désactivé.
 3. **Anonymiser.** Le calcul tourne en arrière-plan. Compter environ 2 min 30 pour 5 min d'audio.
 4. **Lire le Report.** On y trouve le verdict global et la raison de chaque échec, les transcriptions côte à côte et le tableau des features cliniques. Les onglets montrent les spectrogrammes, les contours d'intonation superposés et les distributions de features. Le lecteur A/B bascule entre l'original et la version anonymisée à la même position.
 5. **Ajuster les seuils.** Les verdicts sont recalculés immédiatement, sans relancer l'anonymisation.
@@ -47,22 +47,22 @@ uv run anodio evaluate-corpus corpus/ --seed-map seeds.csv --output evaluation.j
 
 `--no-privacy` et `--no-content` désactivent les axes qui nécessitent un modèle. `uv run anodio <commande> --help` liste toutes les options.
 
-## Ce que fait la chaîne
+## Ce que fait la Chain
 
-| Étape | Effet | Paramètre (plage sûre) |
+| Stage | Effet | Param (Safe range) |
 |---|---|---|
 | **PSOLA** | Décale le F0 et les formants. Le jitter et le shimmer de l'original sont reportés période par période. | `pitch_semitones` ∈ [−5 ; −2] ∪ [2 ; 5], `formant_ratio` ∈ [0,85 ; 0,95] ∪ [1,05 ; 1,15] |
 | **McAdams** | Déplace l'enveloppe spectrale (pôles LPC élevés à la puissance α). | `mcadams_alpha` ∈ [0,5 ; 0,9] |
 | **VTLN** | Applique un warping bilinéaire de l'enveloppe spectrale. | `vtln_alpha` ∈ [−0,15 ; −0,05] ∪ [0,05 ; 0,15] |
 
-Les plages excluent volontairement les valeurs proches de l'identité, qui n'anonymisent pas. L'excitation glottique (le résidu LPC) n'est jamais resynthétisée : c'est ce qui préserve les features cliniques (voir [l'ADR 0001](docs/adr/0001-chaine-dsp-plutot-que-conversion-neuronale.md)).
+Les Safe ranges excluent volontairement les valeurs proches de l'identité, qui n'anonymisent pas. L'excitation glottique (le résidu LPC) n'est jamais resynthétisée : c'est ce qui préserve les features cliniques (voir [l'ADR 0001](docs/adr/0001-chaine-dsp-plutot-que-conversion-neuronale.md)).
 
 ## Les axes du Report
 
 | Axe | Mesure | Seuil par défaut |
 |---|---|---|
 | **Privacy** | Similarité cosinus entre les embeddings ECAPA de l'original et de la version anonymisée | < 0,25 |
-| **Contenu** | WER de la transcription Whisper de la version anonymisée, en prenant celle de l'original comme référence | ≤ 5 % |
+| **Contenu** | WER de la transcription Whisper de la version anonymisée, en prenant celle de l'original comme référence | < 5 % |
 | **Prosodie** | Corrélation des contours de F0 normalisés (demi-tons / médiane), position des pauses et durée, DTW de l'énergie | corrélation ≥ 0,9 ; décalage des pauses ≤ 20 ms |
 | **Clinique** | CV et écart-type (en demi-tons) du F0, jitter, shimmer, HNR, débit, nombre et durée des pauses | écart relatif ≤ 10 % (shimmer : 25 %) ; HNR : écart ≤ 3 dB |
 | **Informatif** | KL, Jensen-Shannon et Wasserstein entre les distributions de MFCC, de F0 et d'énergie | jamais jugé |
@@ -71,11 +71,11 @@ Le **verdict global** est réussi quand tous les axes jugés réussissent. Les d
 
 ## Limites connues
 
-- **La Privacy n'est évaluée que face à un ASV automatique (ECAPA).** Ni un auditeur humain, en particulier un proche, ni un attaquant entraîné sur des voix anonymisées ne sont pris en compte. La Corpus evaluation ajoute la condition *lazy-informed*, où l'attaquant connaît la chaîne mais pas la Seed.
+- **La Privacy n'est évaluée que face à un ASV automatique (ECAPA).** Ni un auditeur humain, en particulier un proche, ni un attaquant entraîné sur des voix anonymisées ne sont pris en compte. La Corpus evaluation ajoute les conditions *ignorant* et *lazy-informed*, où l'attaquant connaît l'Anonymizer mais pas la Seed.
 - **La Privacy attendue est modérée.** Pour préserver les features cliniques, anodio utilise du traitement du signal plutôt qu'une conversion de voix neuronale (ADR 0001). Il faut s'attendre à un EER face à l'ASV nettement inférieur à 50 %. Mesurez-le sur vos données avec `evaluate-corpus`.
 - **Une Seed partagée crée de la Linkability.** Deux enregistrements anonymisés avec la même Seed portent la même pseudo-voix : on peut les relier entre eux, ce qui est voulu pour le suivi d'un même locuteur. Ne réutilisez pas une Seed entre locuteurs ou entre études si ce lien doit rester impossible. Stockez les Seeds comme une donnée sensible.
 - **Le seuil cosinus de 0,25 est indicatif.** Il dépend du modèle et de la langue. Recalibrez-le avec `evaluate-corpus` sur des données françaises.
-- **Le HNR dépend en partie du conduit vocal**, que la chaîne déplace volontairement. Avec des paramètres modérés, il baisse de 3,6 à 4 dB sur nos voix de test. Avec un McAdams fort (α proche de 0,5), le jitter et le HNR peuvent dériver fortement. L'axe Clinique le signale toujours.
+- **Le HNR dépend en partie du conduit vocal**, que la Chain déplace volontairement. Avec des paramètres modérés, il baisse de 3,6 à 4 dB sur nos voix de test. Avec un McAdams fort (α proche de 0,5), le jitter et le HNR peuvent dériver fortement. L'axe Clinique le signale toujours.
 - **La validation automatique repose sur des voix synthétiques** aux propriétés connues. Les écarts mesurés sur de vrais enregistrements peuvent différer : vérifiez le Report de vos propres fichiers.
 
 ## Développement

@@ -82,3 +82,14 @@ def test_real_whisper_transcribes_offline_without_hallucinating_on_silence(speec
 
     assert transcriber.transcribe(Audio(np.zeros(32000, np.float32), 16000)) == ""
     assert isinstance(transcriber.transcribe(speech), str)
+
+
+def test_wer_exactly_at_the_threshold_fails(speech, anonymized):
+    # 1 error in 20 words = 5 %: the spec asks for a WER increase strictly below 5 points.
+    reference = " ".join(f"mot{i}" for i in range(20))
+    hypothesis = " ".join(f"mot{i}" for i in range(19)) + " autre"
+
+    content = _content(speech, anonymized, (reference, hypothesis))
+
+    assert content.measures["wer"] == pytest.approx(0.05)
+    assert content.verdict is False

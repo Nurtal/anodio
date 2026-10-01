@@ -55,21 +55,21 @@ def test_eer_of_overlapping_scores():
 
 
 def test_three_attack_conditions_are_reported(result):
-    assert set(result["privacy"]) == {"original", "ignorant", "lazy_informed"}
+    assert set(result["privacy"]) == {"baseline", "ignorant", "lazy_informed"}
     for condition in result["privacy"].values():
         assert 0 <= condition["eer"] <= 1
 
 
 def test_original_speakers_are_recognised(result):
-    assert result["privacy"]["original"]["eer"] < 0.2
+    assert result["privacy"]["baseline"]["eer"] < 0.2
 
 
 def test_trials_never_pair_a_recording_with_itself(result):
     n = len(SPEAKERS) * TAKES
     same_speaker_pairs = len(SPEAKERS) * TAKES * (TAKES - 1)
     privacy = result["privacy"]
-    assert privacy["original"]["target_trials"] == same_speaker_pairs // 2
-    assert privacy["original"]["target_trials"] + privacy["original"]["nontarget_trials"] == n * (n - 1) // 2
+    assert privacy["baseline"]["target_trials"] == same_speaker_pairs // 2
+    assert privacy["baseline"]["target_trials"] + privacy["baseline"]["nontarget_trials"] == n * (n - 1) // 2
     for condition in ("ignorant", "lazy_informed"):
         assert privacy[condition]["target_trials"] == same_speaker_pairs
         assert privacy[condition]["target_trials"] + privacy[condition]["nontarget_trials"] == n * (n - 1)
@@ -101,4 +101,4 @@ def test_cli_corpus_evaluation_smoke(tmp_path, monkeypatch):
     data = json.loads(out.read_text())
     assert data["speakers"] == 2
     assert data["attacker_seed"] == 7
-    assert {"original", "ignorant", "lazy_informed"} <= set(data["privacy"])
+    assert {"baseline", "ignorant", "lazy_informed"} <= set(data["privacy"])

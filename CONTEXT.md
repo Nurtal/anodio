@@ -90,8 +90,12 @@ La réussite ou l'échec d'un Axis, obtenu en comparant ses mesures à son Thres
 ## Menace
 
 **ASV attacker** :
-L'adversaire visé : un système automatique de vérification du locuteur qui ne connaît pas l'Anonymizer. Un auditeur humain et un attaquant entraîné sur des voix anonymisées sont hors périmètre.
+L'adversaire visé : un système automatique de vérification du locuteur, pré-entraîné sur des voix non anonymisées. Selon la condition, il ignore l'Anonymization (Ignorant attack) ou connaît l'Anonymizer sans connaître la Seed (Lazy-informed attack). Un auditeur humain et un attaquant entraîné sur des voix anonymisées sont hors périmètre.
 _Avoid_ : pirate, adversaire (sans préciser)
+
+**Baseline** (condition de référence) :
+Une condition de Corpus evaluation où l'ASV attacker compare des Originaux entre eux. Elle mesure ce que l'ASV attacker sait faire sans Anonymization ; les autres conditions se lisent par rapport à elle.
+_Avoid_ : condition originale
 
 **Ignorant attack** :
 Une condition de Corpus evaluation où l'ASV attacker enrôle des Originaux et les compare à des versions Anonymized d'*autres* enregistrements : il ignore l'Anonymization.

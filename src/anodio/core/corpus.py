@@ -1,7 +1,7 @@
 """Corpus evaluation: Privacy as an EER over many Speakers, plus utility aggregates.
 
 Attack conditions (VoicePrivacy Challenge terminology):
-- original: Original enrolment vs Original trial, the reference ASV performance;
+- baseline: Original enrolment vs Original trial, the reference ASV performance;
 - ignorant: Original enrolment vs Anonymized trial, the attacker ignores the Anonymization;
 - lazy_informed: the attacker anonymizes the enrolment with the same Chain but their own
   Seed, then compares it to the Anonymized trials.
@@ -79,7 +79,7 @@ def evaluate_corpus(
         "attacker_seed": attacker_seed,
         "embedder": embedder.name,
         "privacy": {
-            "original": _condition(list(combinations(range(n), 2)), originals, originals, speakers),
+            "baseline": _condition(list(combinations(range(n), 2)), originals, originals, speakers),
             "ignorant": _condition(ordered, originals, anonymized, speakers),
             "lazy_informed": _condition(ordered, attacker, anonymized, speakers),
         },

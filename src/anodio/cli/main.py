@@ -86,7 +86,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     corpus = sub.add_parser(
         "evaluate-corpus",
-        help="Corpus evaluation : EER de l'ASV attacker (original, ignorant, lazy-informed) et agrégats d'utilité.",
+        help="Corpus evaluation : EER de l'ASV attacker (baseline, ignorant, lazy-informed) et agrégats d'utilité.",
     )
     corpus.add_argument("input", type=Path, help="Dossier du corpus (corpus/<speaker>/*.wav), au moins 2 Speakers.")
     corpus.add_argument("--seed", type=int, default=None, help="Seed commune (ou de repli avec --seed-map).")
