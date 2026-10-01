@@ -52,7 +52,7 @@ Les trois tickets portent le label `ready-for-agent` et sont rattachés comme so
 
 ### État à la fin de la session
 
-- 204 tests passent dans la suite rapide (les tests lents avec les vrais modèles passaient à la fin de l'implémentation). mypy est propre.
+- Les 207 tests passent, y compris les tests lents avec les vrais modèles ECAPA et Whisper. mypy est propre.
 - Les commits sont sur `main` en local. **Rien n'est poussé** : `origin/main` ne contient que le commit de documentation du début.
 
 ## Questions ouvertes (tes décisions)
