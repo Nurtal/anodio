@@ -24,3 +24,11 @@ Points soumis à ta décision : voir la section « Questions ouvertes » en bas.
 - **Conséquence.** `--no-privacy` et `--no-content` donnent maintenant toujours un Verdict global en échec. C'est voulu : un résultat dont la Privacy n'a pas été vérifiée n'est pas « utilisable ».
 - **Tests.** Deux nouveaux tests dans `tests/test_verdicts.py`, écrits avant le code (red → green).
 
+### 2. Traitement par lot interrompu par une erreur imprévue — corrigé
+
+- **Problème.** Seules les `AnodioError` étaient isolées fichier par fichier. En reproduisant le cas, j'ai trouvé qu'un fichier trop court (400 échantillons) faisait planter l'analyse de pitch de Praat avec une `PraatError`, ce qui arrêtait tout le lot.
+- **Corrections.**
+  - `load_wav` refuse les enregistrements de moins de 0,5 s avec un message clair (« … est trop court (0.03 s) : il faut au moins 0.5 s de signal »). En dessous, Praat ne peut pas mesurer le F0.
+  - `anodio batch` attrape désormais toute exception par fichier, l'inscrit dans `summary.json` (« Erreur inattendue : … ») et passe au fichier suivant.
+- **Tests.** Trois nouveaux tests : un fichier trop court est refusé, un fichier trop court est signalé sans interrompre le lot, une exception arbitraire sur un fichier n'interrompt pas le lot. Deux anciens tests d'I/O utilisaient des signaux de 0,05 et 0,1 s ; je les ai allongés à 1 s sans changer ce qu'ils vérifient.
+

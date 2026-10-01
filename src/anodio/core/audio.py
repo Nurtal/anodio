@@ -13,6 +13,10 @@ class AnodioError(Exception):
     """An error whose message can be shown as-is to the user."""
 
 
+# Praat's pitch analysis needs several periods of the lowest F0 searched.
+MIN_DURATION_SECONDS = 0.5
+
+
 @dataclass(frozen=True, eq=False)
 class Audio:
     samples: np.ndarray  # mono, float32
@@ -31,7 +35,12 @@ def load_wav(path: str | Path) -> Audio:
         data, sample_rate = sf.read(path, dtype="float32", always_2d=True)
     except (sf.LibsndfileError, RuntimeError) as exc:
         raise AnodioError(f"Impossible de lire {path.name} comme un fichier .wav : {exc}") from exc
-    return Audio(data.mean(axis=1).astype(np.float32), int(sample_rate))
+    audio = Audio(data.mean(axis=1).astype(np.float32), int(sample_rate))
+    if audio.duration < MIN_DURATION_SECONDS:
+        raise AnodioError(
+            f"{path.name} est trop court ({audio.duration:.2f} s) : il faut au moins {MIN_DURATION_SECONDS} s de signal."
+        )
+    return audio
 
 
 def save_wav(path: str | Path, audio: Audio) -> None:

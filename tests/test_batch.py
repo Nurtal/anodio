@@ -105,3 +105,43 @@ def test_params_and_thresholds_options_apply_to_the_batch(corpus, tmp_path):
     assert report["axes"]["privacy"]["verdict"] is True
     assert "content" not in report["axes"]
     assert _summary(out)["files"][0]["verdict"] in (True, False)
+
+
+def test_too_short_recording_is_reported_without_stopping_the_batch(corpus, tmp_path):
+    import numpy as np
+
+    from anodio.core import Audio
+
+    save_wav(corpus / "alice" / "click.wav", Audio(np.full(400, 0.1, np.float32), 16000))
+    out = tmp_path / "out"
+
+    exit_code = main(["batch", str(corpus), "--out-dir", str(out), "--seed", "1"])
+
+    summary = _summary(out)
+    assert exit_code == 2
+    assert summary["processed"] == 4
+    click = next(entry for entry in summary["files"] if entry["file"].endswith("click.wav"))
+    assert "trop court" in click["error"]
+
+
+def test_unexpected_error_on_one_file_does_not_stop_the_batch(corpus, tmp_path, monkeypatch):
+    real_anonymize = cli.anonymize
+
+    calls = []
+
+    def flaky(original, params):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("boom")
+        return real_anonymize(original, params)
+
+    monkeypatch.setattr(cli, "anonymize", flaky)
+    out = tmp_path / "out"
+
+    exit_code = main(["batch", str(corpus), "--out-dir", str(out), "--seed", "1"])
+
+    summary = _summary(out)
+    assert exit_code == 2
+    assert summary["failed"] == 1
+    assert summary["processed"] == 3
+    assert any("boom" in entry.get("error", "") for entry in summary["files"])

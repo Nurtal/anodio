@@ -247,6 +247,9 @@ def _anonymize_batch(args: argparse.Namespace) -> int:
         except AnodioError as exc:
             entry["error"] = str(exc)
             print(f"{relative} : ERREUR — {exc}", file=sys.stderr)
+        except Exception as exc:  # noqa: BLE001 - one bad file must not stop the batch
+            entry["error"] = f"Erreur inattendue : {exc!r}"
+            print(f"{relative} : ERREUR INATTENDUE — {exc!r}", file=sys.stderr)
         entries.append(entry)
 
     failed = sum("error" in entry for entry in entries)
