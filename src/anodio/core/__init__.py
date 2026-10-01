@@ -3,7 +3,7 @@
 from anodio.core.anonymize import Anonymizer, anonymize, chain
 from anodio.core.audio import AnodioError, Audio, load_wav, save_wav
 from anodio.core.evaluate import DEFAULT_THRESHOLDS, evaluate
-from anodio.core.models import ModelsMissingError, SpeakerEmbedder
+from anodio.core.models import ModelsMissingError, SpeakerEmbedder, Transcriber
 from anodio.core.params import IDENTITY, SAFE_RANGES, STAGES, Params, draw_params, random_seed
 from anodio.core.report import AxisResult, Report
 
@@ -11,6 +11,7 @@ __all__ = [
     "IDENTITY",
     "ModelsMissingError",
     "SpeakerEmbedder",
+    "Transcriber",
     "STAGES",
     "Anonymizer",
     "chain",

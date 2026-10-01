@@ -7,15 +7,18 @@ import math
 import numpy as np
 
 from anodio.core.audio import Audio
-from anodio.core.models import SpeakerEmbedder
+from anodio.core.models import SpeakerEmbedder, Transcriber
 from anodio.core.features import clinical_features, energy_db, energy_dtw_db, f0_contour, f0_correlation
 from anodio.core.params import Params
 from anodio.core.report import AxisResult, Measure, Report
 from anodio.core.timing import pauses
+from anodio.core.wer import word_error_rate
 
 DEFAULT_THRESHOLDS: dict[str, dict[str, float]] = {
     # Indicative ECAPA decision threshold: recalibrate it with a Corpus evaluation.
     "privacy": {"max_cosine_similarity": 0.25},
+    # WER of the Anonymized transcript against the Original transcript.
+    "content": {"max_wer": 0.05},
     "prosody": {"max_pause_boundary_error_ms": 20.0, "min_f0_correlation": 0.9},
     # Per-feature limits override the default "max_relative_deviation". The HNR is in dB and
     # partly depends on the vocal tract (which the Anonymization moves on purpose), so it is
@@ -34,13 +37,16 @@ def evaluate(
     params: Params | None = None,
     thresholds: dict[str, dict[str, float]] | None = None,
     embedder: SpeakerEmbedder | None = None,
+    transcriber: Transcriber | None = None,
 ) -> Report:
-    """Measure each Axis. Without an `embedder`, the Privacy Axis is left out."""
+    """Measure each Axis. Without an `embedder` / a `transcriber`, Privacy / Content is left out."""
     merged = {axis: {**values, **(thresholds or {}).get(axis, {})} for axis, values in DEFAULT_THRESHOLDS.items()}
     contour_o, contour_a = f0_contour(original), f0_contour(anonymized)
     axes = {}
     if embedder is not None:
         axes["privacy"] = _privacy(original, anonymized, embedder, merged["privacy"])
+    if transcriber is not None:
+        axes["content"] = _content(original, anonymized, transcriber, merged["content"])
     axes["prosody"] = _prosody(original, anonymized, contour_o, contour_a, merged["prosody"])
     axes["clinical"] = _clinical(original, anonymized, contour_o, contour_a, merged["clinical"])
     return Report(axes=axes, params=params)
@@ -60,6 +66,23 @@ def _privacy(original, anonymized, embedder: SpeakerEmbedder, thresholds: dict[s
             f"(seuil : {limit:.2f})."
         )
     measures: dict[str, Measure] = {"cosine_similarity": similarity, "embedder": embedder.name}
+    return AxisResult(measures, dict(thresholds), verdict=not failures, failures=failures)
+
+
+def _content(original, anonymized, transcriber: Transcriber, thresholds: dict[str, float]) -> AxisResult:
+    reference, hypothesis = transcriber.transcribe(original), transcriber.transcribe(anonymized)
+    wer = word_error_rate(reference, hypothesis)
+    failures = []
+    if wer is None:
+        failures.append("Aucune parole reconnue dans l'original : le contenu ne peut pas être comparé.")
+    elif wer > thresholds["max_wer"]:
+        failures.append(f"WER de {100 * wer:.0f} % par rapport à l'original (seuil : {100 * thresholds['max_wer']:.0f} %).")
+    measures: dict[str, Measure] = {
+        "wer": wer,
+        "transcript_original": reference,
+        "transcript_anonymized": hypothesis,
+        "transcriber": transcriber.name,
+    }
     return AxisResult(measures, dict(thresholds), verdict=not failures, failures=failures)
 
 

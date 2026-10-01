@@ -18,3 +18,16 @@ class SpectrumEmbedder:
         x = x[np.sqrt(np.mean(x**2, axis=1)) > 1e-4]
         spectrum = np.log(np.mean(np.abs(np.fft.rfft(x * np.hanning(frame), axis=1)) ** 2, axis=0) + 1e-12)
         return spectrum - spectrum.mean()
+
+
+class ScriptedTranscriber:
+    """Returns a fixed transcript per recording (keyed by object identity)."""
+
+    name = "fake-scripted"
+
+    def __init__(self, transcripts: dict[int, str] | None = None, default: str = "") -> None:
+        self.transcripts = transcripts or {}
+        self.default = default
+
+    def transcribe(self, audio: Audio) -> str:
+        return self.transcripts.get(id(audio), self.default)

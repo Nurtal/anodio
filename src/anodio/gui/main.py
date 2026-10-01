@@ -9,6 +9,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
+    QComboBox,
+    QHBoxLayout,
     QFileDialog,
     QLabel,
     QMainWindow,
@@ -24,12 +26,13 @@ from anodio.core import (
     ModelsMissingError,
     Report,
     SpeakerEmbedder,
+    Transcriber,
     anonymize,
     evaluate,
     load_wav,
     save_wav,
 )
-from anodio.core.models import EcapaEmbedder
+from anodio.core.models import DEFAULT_WHISPER_SIZE, WHISPER_SIZES, EcapaEmbedder, WhisperTranscriber
 from anodio.gui.params_panel import ParamsPanel
 from anodio.gui.report_view import ReportView
 
@@ -42,12 +45,22 @@ class MainWindow(QMainWindow):
         self.anonymized: Audio | None = None
         self.report: Report | None = None
         self._embedder: SpeakerEmbedder | None = None
+        self._transcribers: dict[str, Transcriber] = {}
+        self._warned_missing: set[str] = set()
 
         self.file_label = QLabel("Aucun fichier chargé.")
         load_button = QPushButton("Charger un .wav…")
         load_button.clicked.connect(self.load)
 
         self.params_panel = ParamsPanel()
+
+        self.whisper_size = QComboBox()
+        self.whisper_size.addItems(WHISPER_SIZES)
+        self.whisper_size.setCurrentText(DEFAULT_WHISPER_SIZE)
+        models_row = QHBoxLayout()
+        models_row.addWidget(QLabel("Modèle Whisper (contenu) :"))
+        models_row.addWidget(self.whisper_size)
+        models_row.addStretch(1)
 
         self.anonymize_button = QPushButton("Anonymiser")
         self.anonymize_button.setEnabled(False)
@@ -69,6 +82,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(load_button)
         layout.addWidget(self.file_label)
         layout.addWidget(self.params_panel)
+        layout.addLayout(models_row)
         layout.addWidget(self.anonymize_button)
         layout.addWidget(self.results, 1)
         layout.addWidget(scope)
@@ -102,8 +116,11 @@ class MainWindow(QMainWindow):
         QGuiApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             embedder = self.embedder()
+            transcriber = self.transcriber()
             self.anonymized = anonymize(self.original, params)
-            self.report = evaluate(self.original, self.anonymized, params=params, embedder=embedder)
+            self.report = evaluate(
+                self.original, self.anonymized, params=params, embedder=embedder, transcriber=transcriber
+            )
         finally:
             QGuiApplication.restoreOverrideCursor()
         self.export_button.setEnabled(True)
@@ -115,10 +132,27 @@ class MainWindow(QMainWindow):
             try:
                 self._embedder = EcapaEmbedder()
             except ModelsMissingError as exc:
-                QGuiApplication.restoreOverrideCursor()
-                QMessageBox.warning(self, "Privacy non évaluée", str(exc))
-                QGuiApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+                self._warn_missing("Privacy non évaluée", exc)
         return self._embedder
+
+    def transcriber(self) -> Transcriber | None:
+        """Whisper of the selected size, loaded on first use. Without it, the Content Axis is skipped."""
+        size = self.whisper_size.currentText()
+        if size not in self._transcribers:
+            try:
+                self._transcribers[size] = WhisperTranscriber(size)
+            except ModelsMissingError as exc:
+                self._warn_missing("Contenu non évalué", exc)
+                return None
+        return self._transcribers[size]
+
+    def _warn_missing(self, title: str, error: ModelsMissingError) -> None:
+        if str(error) in self._warned_missing:
+            return
+        self._warned_missing.add(str(error))
+        QGuiApplication.restoreOverrideCursor()
+        QMessageBox.warning(self, title, str(error))
+        QGuiApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
 
     def export(self) -> None:
         assert self.anonymized is not None and self.report is not None and self.original_path is not None

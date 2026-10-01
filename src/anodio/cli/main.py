@@ -11,6 +11,7 @@ from anodio.core import (
     AnodioError,
     Params,
     SpeakerEmbedder,
+    Transcriber,
     anonymize,
     draw_params,
     evaluate,
@@ -18,10 +19,18 @@ from anodio.core import (
     random_seed,
     save_wav,
 )
-from anodio.core.models import EcapaEmbedder, download_models, models_dir
+from anodio.core.models import (
+    DEFAULT_WHISPER_SIZE,
+    WHISPER_SIZES,
+    EcapaEmbedder,
+    WhisperTranscriber,
+    download_models,
+    models_dir,
+)
 
-# Factory of the ASV attacker; replaced by a fake in the tests.
+# Model factories; replaced by fakes in the tests.
 load_embedder = EcapaEmbedder
+load_transcriber = WhisperTranscriber
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -35,12 +44,30 @@ def _build_parser() -> argparse.ArgumentParser:
     one.add_argument(
         "--no-privacy",
         action="store_true",
-        help="Ne pas évaluer la Privacy (aucun modèle n'est alors nécessaire).",
+        help="Ne pas évaluer la Privacy (le modèle ECAPA n'est alors pas nécessaire).",
     )
+    one.add_argument(
+        "--no-content",
+        action="store_true",
+        help="Ne pas évaluer le contenu (Whisper n'est alors pas nécessaire).",
+    )
+    _add_whisper_argument(one)
     _add_params_arguments(one)
 
-    sub.add_parser("download-models", help="Télécharger les modèles une fois pour toutes (connexion requise).")
+    download = sub.add_parser(
+        "download-models", help="Télécharger les modèles une fois pour toutes (connexion requise)."
+    )
+    _add_whisper_argument(download)
     return parser
+
+
+def _add_whisper_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--whisper-size",
+        choices=WHISPER_SIZES,
+        default=DEFAULT_WHISPER_SIZE,
+        help=f"Taille du modèle Whisper (défaut : {DEFAULT_WHISPER_SIZE}).",
+    )
 
 
 def _add_params_arguments(parser: argparse.ArgumentParser) -> None:
@@ -79,11 +106,15 @@ def _params_from_args(args: argparse.Namespace, seed: int | None) -> Params:
 
 
 def _anonymize_file(
-    input_path: Path, params: Params, out_dir: Path | None, embedder: SpeakerEmbedder | None
+    input_path: Path,
+    params: Params,
+    out_dir: Path | None,
+    embedder: SpeakerEmbedder | None,
+    transcriber: Transcriber | None,
 ) -> None:
     original = load_wav(input_path)
     anonymized = anonymize(original, params)
-    report = evaluate(original, anonymized, params=params, embedder=embedder)
+    report = evaluate(original, anonymized, params=params, embedder=embedder, transcriber=transcriber)
 
     out_dir = out_dir or input_path.parent
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -99,10 +130,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "anonymize":
             params = _params_from_args(args, args.seed)
             embedder = None if args.no_privacy else load_embedder()
-            _anonymize_file(args.input, params, args.out_dir, embedder)
+            transcriber = None if args.no_content else load_transcriber(args.whisper_size)
+            _anonymize_file(args.input, params, args.out_dir, embedder, transcriber)
         elif args.command == "download-models":
             print(f"Téléchargement des modèles dans {models_dir()}…")
-            for path in download_models():
+            for path in download_models(whisper_size=args.whisper_size):
                 print(f"  {path}")
     except AnodioError as exc:
         print(f"Erreur : {exc}", file=sys.stderr)

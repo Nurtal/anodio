@@ -1,7 +1,7 @@
 import json
 
 import pytest
-from fakes import SpectrumEmbedder
+from fakes import ScriptedTranscriber, SpectrumEmbedder
 
 from anodio.cli import main as cli
 from anodio.cli.main import main
@@ -11,6 +11,7 @@ from anodio.core import load_wav, save_wav
 @pytest.fixture(autouse=True)
 def fake_models(monkeypatch):
     monkeypatch.setattr(cli, "load_embedder", SpectrumEmbedder)
+    monkeypatch.setattr(cli, "load_transcriber", lambda size: ScriptedTranscriber(default=f"bonjour {size}"))
 
 
 def test_anonymize_command_writes_wav_and_report(tmp_path, speech):
@@ -27,6 +28,17 @@ def test_anonymize_command_writes_wav_and_report(tmp_path, speech):
     assert report["params"]["seed"] == 3
     assert "prosody" in report["axes"]
     assert report["axes"]["privacy"]["measures"]["embedder"] == SpectrumEmbedder.name
+    assert report["axes"]["content"]["measures"]["wer"] == 0
+
+
+def test_whisper_size_is_configurable(tmp_path, speech):
+    source = tmp_path / "a.wav"
+    save_wav(source, speech)
+
+    main(["anonymize", str(source), "--seed", "1", "--out-dir", str(tmp_path), "--whisper-size", "tiny"])
+
+    content = json.loads((tmp_path / "a_anon.json").read_text())["axes"]["content"]
+    assert content["measures"]["transcript_original"] == "bonjour tiny"
 
 
 def test_unreadable_input_fails_with_a_message(tmp_path, capsys):
@@ -76,13 +88,15 @@ def test_missing_models_stop_with_the_download_instruction(tmp_path, speech, cap
     assert "anodio download-models" in capsys.readouterr().err
 
 
-def test_privacy_can_be_skipped(tmp_path, speech, monkeypatch):
+def test_model_axes_can_be_skipped(tmp_path, speech, monkeypatch):
     monkeypatch.undo()
     monkeypatch.setenv("ANODIO_MODELS_DIR", str(tmp_path / "empty"))
     source = tmp_path / "a.wav"
     save_wav(source, speech)
 
-    exit_code = main(["anonymize", str(source), "--seed", "1", "--no-privacy"])
+    exit_code = main(["anonymize", str(source), "--seed", "1", "--no-privacy", "--no-content"])
 
     assert exit_code == 0
-    assert "privacy" not in json.loads((tmp_path / "a_anon.json").read_text())["axes"]
+    axes = json.loads((tmp_path / "a_anon.json").read_text())["axes"]
+    assert "privacy" not in axes
+    assert "content" not in axes

@@ -3,7 +3,16 @@
 from __future__ import annotations
 
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QHeaderView, QLabel, QTableWidget, QTableWidgetItem, QTextEdit, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QGridLayout,
+    QHeaderView,
+    QLabel,
+    QTableWidget,
+    QTableWidgetItem,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 
 from anodio.core import Report
 
@@ -40,10 +49,22 @@ class ReportView(QWidget):
         self.clinical_table.verticalHeader().setVisible(False)
         self.details = QTextEdit()
         self.details.setReadOnly(True)
+        self.transcript_original = QTextEdit()
+        self.transcript_anonymized = QTextEdit()
+        transcripts = QGridLayout()
+        for col, (title, box) in enumerate(
+            (("Transcription de l'original", self.transcript_original),
+             ("Transcription de la version anonymisée", self.transcript_anonymized))
+        ):
+            box.setReadOnly(True)
+            box.setMaximumHeight(80)
+            transcripts.addWidget(QLabel(title), 0, col)
+            transcripts.addWidget(box, 1, col)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.verdicts)
+        layout.addLayout(transcripts)
         layout.addWidget(self.clinical_table, 2)
         layout.addWidget(self.details, 1)
 
@@ -51,12 +72,17 @@ class ReportView(QWidget):
         self.verdicts.clear()
         self.clinical_table.setRowCount(0)
         self.details.clear()
+        self.transcript_original.clear()
+        self.transcript_anonymized.clear()
 
     def show_report(self, report: Report) -> None:
         self.verdicts.setText(
             "   ".join(f"<b>{AXIS_LABELS.get(n, n)}</b> : {VERDICT_TEXT[a.verdict]}" for n, a in report.axes.items())
         )
         self._fill_clinical(report)
+        content = report.axes.get("content")
+        self.transcript_original.setPlainText(str(content.measures["transcript_original"]) if content else "—")
+        self.transcript_anonymized.setPlainText(str(content.measures["transcript_anonymized"]) if content else "—")
         self.details.setPlainText(format_details(report))
 
     def _fill_clinical(self, report: Report) -> None:
@@ -99,6 +125,8 @@ def format_details(report: Report) -> str:
         lines.append(f"{AXIS_LABELS.get(name, name)} : {VERDICT_TEXT[axis.verdict]}")
         lines += [f"  ⚠ {failure}" for failure in axis.failures]
         if name != "clinical":
-            lines += [f"  {key} : {_fmt(value)}" for key, value in axis.measures.items()]
+            lines += [
+                f"  {key} : {_fmt(value)}" for key, value in axis.measures.items() if not key.startswith("transcript_")
+            ]
         lines.append("")
     return "\n".join(lines)
