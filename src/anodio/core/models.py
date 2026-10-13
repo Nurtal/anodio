@@ -11,11 +11,9 @@ from pathlib import Path
 from typing import Protocol
 
 import numpy as np
-from scipy.signal import resample_poly
 
-from anodio.core.audio import AnodioError, Audio
+from anodio.core.audio import ANALYSIS_SAMPLE_RATE, AnodioError, Audio, resample
 
-MODEL_SAMPLE_RATE = 16000
 ECAPA_REPO = "speechbrain/spkrec-ecapa-voxceleb"
 
 
@@ -54,10 +52,7 @@ def _require(path: Path, what: str) -> Path:
 
 
 def to_model_rate(audio: Audio) -> np.ndarray:
-    if audio.sample_rate == MODEL_SAMPLE_RATE:
-        return audio.samples.astype(np.float32)
-    divisor = np.gcd(MODEL_SAMPLE_RATE, audio.sample_rate)
-    return resample_poly(audio.samples, MODEL_SAMPLE_RATE // divisor, audio.sample_rate // divisor).astype(np.float32)
+    return resample(audio, ANALYSIS_SAMPLE_RATE).samples.astype(np.float32)
 
 
 class EcapaEmbedder:

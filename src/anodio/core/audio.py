@@ -7,11 +7,15 @@ from pathlib import Path
 
 import numpy as np
 import soundfile as sf
+from scipy.signal import resample_poly
 
 
 class AnodioError(Exception):
     """An error whose message can be shown as-is to the user."""
 
+
+# Every measure of a Report is taken at this rate, whatever the Original's own sample rate.
+ANALYSIS_SAMPLE_RATE = 16000
 
 # Praat's pitch analysis needs several periods of the lowest F0 searched.
 MIN_DURATION_SECONDS = 0.5
@@ -25,6 +29,15 @@ class Audio:
     @property
     def duration(self) -> float:
         return len(self.samples) / self.sample_rate
+
+
+def resample(audio: Audio, sample_rate: int) -> Audio:
+    """A copy of `audio` at `sample_rate` (the recording itself when it is already at that rate)."""
+    if audio.sample_rate == sample_rate:
+        return audio
+    divisor = int(np.gcd(sample_rate, audio.sample_rate))
+    samples = resample_poly(audio.samples, sample_rate // divisor, audio.sample_rate // divisor)
+    return Audio(samples.astype(np.float32), sample_rate)
 
 
 def load_wav(path: str | Path) -> Audio:

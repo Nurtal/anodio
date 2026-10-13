@@ -23,7 +23,7 @@ uv run anodio download-models          # une seule fois, connexion requise (~1 G
 uv run anodio-gui
 ```
 
-1. **Charger un .wav.** Les fichiers stéréo sont convertis en mono, et toutes les fréquences d'échantillonnage sont acceptées.
+1. **Charger un .wav.** Les fichiers stéréo sont convertis en mono, et toutes les fréquences d'échantillonnage sont acceptées. L'Anonymization et l'export gardent la fréquence d'origine ; les mesures du Report sont prises sur une copie à 16 kHz, pour que les Reports restent comparables d'un fichier à l'autre.
 2. **Choisir une Seed.** La Seed détermine les Params de l'Anonymization, donc la Pseudo-voice. Chaque curseur est verrouillé sur la Seed. En décochant « Seed », on impose une valeur manuelle (un Override), et un avertissement s'affiche si elle sort de sa Safe range. Chaque Stage de la Chain peut être désactivé.
 3. **Anonymiser.** Le calcul tourne en arrière-plan. Compter environ 2 min 30 pour 5 min d'audio.
 4. **Lire le Report.** On y trouve le verdict global et la raison de chaque échec, les transcriptions côte à côte et le tableau des features cliniques. Les onglets montrent les spectrogrammes, les contours d'intonation superposés et les distributions de features. Le lecteur A/B bascule entre l'original et la version anonymisée à la même position.

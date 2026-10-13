@@ -88,3 +88,28 @@ def long_utterance(**kwargs) -> Audio:
     """About 10 s: eight voiced stretches of 1 s separated by 0.25 s pauses."""
     segments = tuple((0.3 + 1.25 * i, 1.3 + 1.25 * i) for i in range(8))
     return utterance(segments=segments, duration=segments[-1][1] + 0.3, **kwargs)
+
+
+def band_limited_utterance(sample_rate: int, vibrato: float = 0.06, shift: float = 0.0) -> Audio:
+    """The same continuous signal whatever the sample rate: harmonics below 6 kHz, defined analytically.
+
+    `utterance` places its pulses on the sample grid, so its content depends on the sample rate.
+    `vibrato` is the relative F0 excursion; `shift` delays the first voiced segment (seconds).
+    """
+    t = np.arange(int(UTTERANCE_DURATION * sample_rate)) / sample_rate
+    f0 = 130.0
+    # Slow vibrato plus a fast, small frequency modulation that gives the voice some jitter.
+    phase = 2 * np.pi * f0 * (
+        t - vibrato / (2 * np.pi * 1.5) * np.cos(2 * np.pi * 1.5 * t) - 0.004 / (2 * np.pi * 31) * np.cos(2 * np.pi * 31 * t)
+    )
+    signal = np.zeros_like(t)
+    for harmonic in range(1, 40):
+        weight = 0.02 + sum(np.exp(-0.5 * ((harmonic * f0 - freq) / (2 * bw)) ** 2) for freq, bw in FORMANTS_HZ)
+        signal += weight * np.sin(harmonic * phase)
+    envelope = np.zeros_like(t)
+    for start, end in ((UTTERANCE_SEGMENTS[0][0] + shift, UTTERANCE_SEGMENTS[0][1] + shift), UTTERANCE_SEGMENTS[1]):
+        envelope += np.clip((t - start) / 0.03, 0, 1) * np.clip((end - t) / 0.03, 0, 1)
+    envelope *= 1 - 0.6 * (0.5 + 0.5 * np.cos(2 * np.pi * 4 * t))  # syllables
+    envelope *= 1 + 0.04 * np.sin(2 * np.pi * 23 * t)  # shimmer
+    signal *= envelope
+    return Audio((0.5 * signal / np.max(np.abs(signal))).astype(np.float32), sample_rate)

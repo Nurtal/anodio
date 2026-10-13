@@ -13,7 +13,7 @@ from dataclasses import replace
 
 import numpy as np
 
-from anodio.core.audio import Audio
+from anodio.core.audio import ANALYSIS_SAMPLE_RATE, Audio, resample
 from anodio.core.distances import distances
 from anodio.core.features import (
     Analysis,
@@ -59,15 +59,20 @@ def evaluate(
     embedder: SpeakerEmbedder | None = None,
     transcriber: Transcriber | None = None,
 ) -> Report:
-    """Measure and judge each Axis. Without an `embedder` / a `transcriber`, Privacy / Content is left out."""
-    contour_o, contour_a = f0_contour(original), f0_contour(anonymized)
+    """Measure and judge each Axis. Without an `embedder` / a `transcriber`, Privacy / Content is left out.
+
+    The measures are taken on 16 kHz copies, so that Reports of recordings with different
+    sample rates are comparable. The models resample by themselves.
+    """
+    analysed_o, analysed_a = resample(original, ANALYSIS_SAMPLE_RATE), resample(anonymized, ANALYSIS_SAMPLE_RATE)
+    contour_o, contour_a = f0_contour(analysed_o), f0_contour(analysed_a)
     analysis = Analysis(
         original_f0=contour_o,
         anonymized_f0=contour_a,
-        original_energy_db=energy_db(original),
-        anonymized_energy_db=energy_db(anonymized),
-        original_mfcc=mfcc(original),
-        anonymized_mfcc=mfcc(anonymized),
+        original_energy_db=energy_db(analysed_o),
+        anonymized_energy_db=energy_db(analysed_a),
+        original_mfcc=mfcc(analysed_o),
+        anonymized_mfcc=mfcc(analysed_a),
     )
     measured: dict[str, Measures] = {}
     models = {}
@@ -77,8 +82,8 @@ def evaluate(
     if transcriber is not None:
         measured["content"] = _measure_content(original, anonymized, transcriber)
         models["transcriber"] = transcriber.name
-    measured["prosody"] = _measure_prosody(original, anonymized, analysis)
-    measured["clinical"] = _measure_clinical(original, anonymized, contour_o, contour_a)
+    measured["prosody"] = _measure_prosody(analysed_o, analysed_a, (original.duration, anonymized.duration), analysis)
+    measured["clinical"] = _measure_clinical(analysed_o, analysed_a, contour_o, contour_a)
     measured["informational"] = _measure_informational(analysis)
     report = Report(
         axes={name: AxisResult(measures, {}, None) for name, measures in measured.items()},
@@ -161,7 +166,10 @@ def _judge_content(m: Measures, t: dict[str, float]) -> list[str]:
 # --- Prosody -----------------------------------------------------------------
 
 
-def _measure_prosody(original: Audio, anonymized: Audio, analysis: Analysis) -> Measures:
+def _measure_prosody(
+    original: Audio, anonymized: Audio, durations: tuple[float, float], analysis: Analysis
+) -> Measures:
+    """`durations` are those of the recordings themselves: resampling rounds them to a whole sample."""
     pauses_o = pauses(original.samples, original.sample_rate)
     pauses_a = pauses(anonymized.samples, anonymized.sample_rate)
     boundary_error_ms = None
@@ -169,8 +177,8 @@ def _measure_prosody(original: Audio, anonymized: Audio, analysis: Analysis) -> 
         diffs = [abs(a - b) for po, pa in zip(pauses_o, pauses_a) for a, b in zip(po, pa)]
         boundary_error_ms = round(1000 * float(np.mean(diffs)), 3) if diffs else 0.0
     return {
-        "duration_original_s": original.duration,
-        "duration_anonymized_s": anonymized.duration,
+        "duration_original_s": durations[0],
+        "duration_anonymized_s": durations[1],
         "pause_count_original": len(pauses_o),
         "pause_count_anonymized": len(pauses_a),
         "total_pause_original_s": round(sum(e - s for s, e in pauses_o), 3),
