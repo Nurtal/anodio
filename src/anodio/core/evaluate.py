@@ -40,7 +40,7 @@ DEFAULT_THRESHOLDS: Thresholds = {
     "privacy": {"max_cosine_similarity": 0.25},
     # WER of the Anonymized transcript against the Original transcript.
     "content": {"max_wer": 0.05},
-    "prosody": {"max_pause_boundary_error_ms": 20.0, "min_f0_correlation": 0.9},
+    "prosody": {"min_f0_correlation": 0.9},
     # Per-feature limits override the default "max_relative_deviation". The HNR is in dB and
     # partly depends on the vocal tract (which the Anonymization moves on purpose), so it is
     # judged by an absolute difference. The local shimmer is very sensitive to the waveform shape.
@@ -194,13 +194,6 @@ def _judge_prosody(m: Measures, t: dict[str, float]) -> list[str]:
     failures = []
     if abs(float(m["duration_original_s"]) - float(m["duration_anonymized_s"])) > 1e-3:  # type: ignore[arg-type]
         failures.append("La durée de la version anonymisée diffère de celle de l'original.")
-    error = m["pause_boundary_error_ms"]
-    if error is None:
-        failures.append(f"Nombre de pauses différent : {m['pause_count_original']} contre {m['pause_count_anonymized']}.")
-    elif float(error) > t["max_pause_boundary_error_ms"]:
-        failures.append(
-            f"Décalage moyen des pauses de {float(error):.0f} ms (seuil : {t['max_pause_boundary_error_ms']:.0f} ms)."
-        )
     correlation = m["f0_correlation"]
     if correlation is None:
         failures.append("Pas assez de trames voisées communes pour comparer l'intonation.")

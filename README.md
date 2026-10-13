@@ -52,7 +52,7 @@ uv run anodio evaluate-corpus corpus/ --seed-map seeds.csv --output evaluation.j
 | Stage | Effet | Param (Safe range) |
 |---|---|---|
 | **PSOLA** | Décale le F0 et les formants. Le jitter et le shimmer de l'original sont reportés période par période. | `pitch_semitones` ∈ [−5 ; −2] ∪ [2 ; 5], `formant_ratio` ∈ [0,85 ; 0,95] ∪ [1,05 ; 1,15] |
-| **McAdams** | Déplace l'enveloppe spectrale (pôles LPC élevés à la puissance α). | `mcadams_alpha` ∈ [0,5 ; 0,9] |
+| **McAdams** | Déplace l'enveloppe spectrale (pôles LPC élevés à la puissance α). | `mcadams_alpha` ∈ [0,65 ; 0,9] |
 | **VTLN** | Applique un warping bilinéaire de l'enveloppe spectrale. | `vtln_alpha` ∈ [−0,15 ; −0,05] ∪ [0,05 ; 0,15] |
 
 Les Safe ranges excluent volontairement les valeurs proches de l'identité, qui n'anonymisent pas. L'excitation glottique (le résidu LPC) n'est jamais resynthétisée : c'est ce qui préserve les features cliniques (voir [l'ADR 0001](docs/adr/0001-chaine-dsp-plutot-que-conversion-neuronale.md)).
@@ -63,7 +63,7 @@ Les Safe ranges excluent volontairement les valeurs proches de l'identité, qui 
 |---|---|---|
 | **Privacy** | Similarité cosinus entre les embeddings ECAPA de l'original et de la version anonymisée | < 0,25 |
 | **Contenu** | WER de la transcription Whisper de la version anonymisée, en prenant celle de l'original comme référence | < 5 % |
-| **Prosodie** | Corrélation des contours de F0 normalisés (demi-tons / médiane), position des pauses et durée, DTW de l'énergie | corrélation ≥ 0,9 ; décalage des pauses ≤ 20 ms |
+| **Prosodie** | Corrélation des contours de F0 normalisés (demi-tons / médiane), durée ; position des pauses et DTW de l'énergie rapportées sans être jugées | corrélation ≥ 0,9 ; durée identique |
 | **Clinique** | CV et écart-type (en demi-tons) du F0, jitter, shimmer, HNR, débit, nombre et durée des pauses | écart relatif ≤ 10 % (shimmer : 25 %) ; HNR : écart ≤ 3 dB |
 | **Informatif** | KL, Jensen-Shannon et Wasserstein entre les distributions de MFCC, de F0 et d'énergie | jamais jugé |
 
@@ -72,11 +72,18 @@ Le **verdict global** est réussi quand tous les axes jugés réussissent. Les d
 ## Limites connues
 
 - **La Privacy n'est évaluée que face à un ASV automatique (ECAPA).** Ni un auditeur humain, en particulier un proche, ni un attaquant entraîné sur des voix anonymisées ne sont pris en compte. La Corpus evaluation ajoute les conditions *ignorant* et *lazy-informed*, où l'attaquant connaît l'Anonymizer mais pas la Seed.
-- **La Privacy attendue est modérée.** Pour préserver les features cliniques, anodio utilise du traitement du signal plutôt qu'une conversion de voix neuronale (ADR 0001). Il faut s'attendre à un EER face à l'ASV nettement inférieur à 50 %. Mesurez-le sur vos données avec `evaluate-corpus`.
+- **La Privacy attendue est modérée.** Pour préserver les features cliniques, anodio utilise du traitement du signal plutôt qu'une conversion de voix neuronale (ADR 0001). Sur 10 locuteurs français (voir ci-dessous), l'EER de l'ASV passe de 0 % sans anonymisation à 26 % (*ignorant*) et 36 % (*lazy-informed*), loin des 50 % d'un anonymat parfait. Mesurez-le sur vos données avec `evaluate-corpus`.
 - **Une Seed partagée crée de la Linkability.** Deux enregistrements anonymisés avec la même Seed portent la même pseudo-voix : on peut les relier entre eux, ce qui est voulu pour le suivi d'un même locuteur. Ne réutilisez pas une Seed entre locuteurs ou entre études si ce lien doit rester impossible. Stockez les Seeds comme une donnée sensible.
 - **Le seuil cosinus de 0,25 est indicatif.** Il dépend du modèle et de la langue. Recalibrez-le avec `evaluate-corpus` sur des données françaises.
-- **Le HNR dépend en partie du conduit vocal**, que la Chain déplace volontairement. Avec des paramètres modérés, il baisse de 3,6 à 4 dB sur nos voix de test. Avec un McAdams fort (α proche de 0,5), le jitter et le HNR peuvent dériver fortement. L'axe Clinique le signale toujours.
-- **La validation automatique repose sur des voix synthétiques** aux propriétés connues. Les écarts mesurés sur de vrais enregistrements peuvent différer : vérifiez le Report de vos propres fichiers.
+- **Le HNR dépend en partie du conduit vocal**, que la Chain déplace volontairement. L'axe Clinique le signale toujours.
+- **Sur de vraies voix, l'utilité n'est pas encore au rendez-vous.** Les tests automatiques reposent sur des voix synthétiques, où les features cliniques sont préservées. Sur 60 enregistrements de 10 locuteurs français (Multilingual LibriSpeech, livres audio lus, compression avec pertes), avec les Thresholds par défaut : 5 % des enregistrements réussissent l'axe Clinique (écart médian de 23 % sur le jitter, 41 % sur le shimmer, 5,7 dB sur le HNR), 57 % l'axe Prosodie, 10 % l'axe Contenu (WER moyen de 29 %). Vérifiez le Report de vos propres fichiers avant tout usage clinique.
+
+Pour reproduire ces chiffres :
+
+```bash
+uv run python scripts/fetch_mls_french.py corpus/mls-french      # 10 locuteurs × 6 énoncés, CC BY 4.0
+uv run anodio evaluate-corpus corpus/mls-french --seed-map seeds.csv --attacker-seed 7
+```
 
 ## Développement
 

@@ -12,7 +12,6 @@ from anodio.gui.report_view import AXIS_LABELS, CLINICAL_LABELS
 KEY_LABELS = {
     "max_cosine_similarity": "Similarité cosinus max.",
     "max_wer": "WER max.",
-    "max_pause_boundary_error_ms": "Décalage des pauses max. (ms)",
     "min_f0_correlation": "Corrélation F0 min.",
     "max_relative_deviation": "Écart relatif max. (par défaut)",
 }

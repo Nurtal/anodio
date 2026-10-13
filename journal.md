@@ -55,7 +55,46 @@ Les trois tickets portent le label `ready-for-agent` et sont rattachés comme so
 - Les 207 tests passent, y compris les tests lents avec les vrais modèles ECAPA et Whisper. mypy est propre.
 - Les commits sont sur `main` en local. **Rien n'est poussé** : `origin/main` ne contient que le commit de documentation du début.
 
+## 2026-10-13 — Tickets #12 à #14, décisions et première validation sur de vraies voix
+
+### Tickets #12, #13, #14 — faits
+
+- **#12.** `evaluate` mesure sur des copies à 16 kHz ; l'Anonymization et l'export gardent la fréquence d'origine.
+- **#13.** La GUI affiche la forme d'onde de l'Original dès le chargement, puis celle de l'Anonymized en dessous.
+- **#14.** Registre de Stages unique (`REGISTRY` dans `core/stages.py`), clés de Thresholds typées (`core/thresholds.py`), résultat de Corpus evaluation typé. Le JSON du Report et celui de `evaluate-corpus` n'ont pas changé.
+
+### Décisions prises
+
+1. **WER.** Un seul WER (Anonymized contre Original). Rien à changer.
+2. **Pauses.** L'axe Prosody suit la spec : son Verdict ne dépend plus que de la corrélation de F0 (et de la durée identique). Les statistiques de pauses restent rapportées. Le Threshold `prosody.max_pause_boundary_error_ms` disparaît. L'axe Clinical juge toujours le nombre et la durée moyenne des pauses.
+3. **McAdams.** Le plancher de la Safe range passe de 0,5 à 0,65. Sur 10 locuteurs réels, McAdams seul en dessous de 0,65 fait échouer la corrélation de F0 une fois sur deux et déplace le jitter de 40 % (médiane), sans rendre la voix moins reconnaissable (cosinus de 0,08 contre 0,11 à 0,65). ⚠️ Chaque Seed tire désormais un autre `mcadams_alpha`, donc une autre Pseudo-voice.
+
+### Première validation sur de vraies voix
+
+Corpus : 60 énoncés de 10 locuteurs du split de test français de Multilingual LibriSpeech (CC BY 4.0), récupérés par `scripts/fetch_mls_french.py`. Une Seed par Speaker, Thresholds par défaut, Whisper small.
+
+| Mesure | Résultat |
+|---|---|
+| EER Baseline | 0 % |
+| EER Ignorant | 26 % |
+| EER Lazy-informed | 36 % |
+| Axe Content réussi | 10 % des enregistrements (WER moyen 29 %) |
+| Axe Prosody réussi | 57 % |
+| Axe Clinical réussi | 5 % |
+| Écart médian jitter / shimmer / HNR | 23 % / 41 % / 5,7 dB |
+
+- **La Privacy est modérée, comme prévu**, et bien meilleure que sur les voix synthétiques.
+- **L'utilité ne tient pas sur ces voix.** Le Content et le Clinical échouent presque toujours. C'est le contraire de ce que montraient les voix synthétiques, et cela touche la raison d'être de l'ADR 0001.
+- **Réserve.** Ces enregistrements sont des livres audio compressés avec pertes (MP3 64 kb/s puis Opus), loin d'un enregistrement clinique. Il faudrait refaire la mesure sur des voix non compressées avant de conclure.
+
+### État à la fin de la session
+
+- 283 tests rapides et les 3 tests lents (vrais modèles) passent. mypy est propre.
+- `main` est poussé. Les décisions 2 et 3, le script et ces résultats sont dans une PR.
+
 ## Questions ouvertes (tes décisions)
+
+*Les questions 1 à 5 ci-dessous sont tranchées (voir le 2026-10-13). Reste ouverte : que faire de l'utilité insuffisante sur de vraies voix ?*
 
 1. **WER : un ou deux ?** La user story 25 demande « le WER de l'Original, celui de l'Anonymized et leur écart », alors que la spec dit aussi « la transcription de l'Original sert de référence, donc pas de vérité terrain ». Sans vérité terrain, le WER de l'Original est par définition 0. Aujourd'hui, on calcule un seul WER (Anonymized contre Original). Pour avoir les deux, il faudrait pouvoir fournir une transcription de référence, par exemple un `.txt` à côté du `.wav`. Est-ce utile ?
 2. **Les pauses doivent-elles être jugées ?** La spec disait « les statistiques de pauses sont aussi rapportées ». Le code fait aussi échouer la Prosody si les pauses bougent de plus de 20 ms ou si leur nombre change. C'est plus strict que la spec, mais cohérent avec l'Invariant « timing ». On garde ?
