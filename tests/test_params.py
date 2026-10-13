@@ -27,6 +27,11 @@ def test_drawn_params_avoid_the_identity(seed):
     assert params.mcadams_alpha <= 0.9
 
 
+@pytest.mark.parametrize("seed", range(50))
+def test_drawn_mcadams_stays_above_the_floor_that_keeps_the_prosody(seed):
+    assert draw_params(seed).mcadams_alpha >= 0.65
+
+
 def test_both_directions_are_drawn():
     signs = {draw_params(seed).pitch_semitones > 0 for seed in range(50)}
     assert signs == {True, False}

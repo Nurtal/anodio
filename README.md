@@ -52,7 +52,7 @@ uv run anodio evaluate-corpus corpus/ --seed-map seeds.csv --output evaluation.j
 | Stage | Effet | Param (Safe range) |
 |---|---|---|
 | **PSOLA** | Décale le F0 et les formants. Le jitter et le shimmer de l'original sont reportés période par période. | `pitch_semitones` ∈ [−5 ; −2] ∪ [2 ; 5], `formant_ratio` ∈ [0,85 ; 0,95] ∪ [1,05 ; 1,15] |
-| **McAdams** | Déplace l'enveloppe spectrale (pôles LPC élevés à la puissance α). | `mcadams_alpha` ∈ [0,5 ; 0,9] |
+| **McAdams** | Déplace l'enveloppe spectrale (pôles LPC élevés à la puissance α). | `mcadams_alpha` ∈ [0,65 ; 0,9] |
 | **VTLN** | Applique un warping bilinéaire de l'enveloppe spectrale. | `vtln_alpha` ∈ [−0,15 ; −0,05] ∪ [0,05 ; 0,15] |
 
 Les Safe ranges excluent volontairement les valeurs proches de l'identité, qui n'anonymisent pas. L'excitation glottique (le résidu LPC) n'est jamais resynthétisée : c'est ce qui préserve les features cliniques (voir [l'ADR 0001](docs/adr/0001-chaine-dsp-plutot-que-conversion-neuronale.md)).

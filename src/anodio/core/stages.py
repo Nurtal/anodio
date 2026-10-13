@@ -274,8 +274,9 @@ REGISTRY: tuple[Stage, ...] = (
         label="McAdams",
         position=20,
         params=(
+            # Below 0.65, real voices lose their F0 contour and jitter without getting any less recognisable.
             ParamSpec(
-                "mcadams_alpha", "Coefficient McAdams α", safe_ranges=((0.5, 0.9),), identity=1.0, bounds=(0.4, 1.0)
+                "mcadams_alpha", "Coefficient McAdams α", safe_ranges=((0.65, 0.9),), identity=1.0, bounds=(0.4, 1.0)
             ),
         ),
         apply=_apply_mcadams,
