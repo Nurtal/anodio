@@ -26,7 +26,7 @@ from anodio.core import AnodioError, Audio, Report, apply_thresholds, load_wav, 
 from anodio.core.models import DEFAULT_WHISPER_SIZE, WHISPER_SIZES
 from anodio.gui.params_panel import ParamsPanel
 from anodio.gui.player import ABPlayer
-from anodio.gui.plots import F0View, HistogramView, SpectrogramView
+from anodio.gui.plots import F0View, HistogramView, SpectrogramView, WaveformView
 from anodio.gui.report_view import ReportView
 from anodio.gui.thresholds_panel import ThresholdsPanel
 from anodio.gui.worker import AnonymizationWorker, ModelCache
@@ -49,6 +49,8 @@ PRIVACY_SCOPE = (
     "La Privacy est évaluée face à un système automatique de vérification du locuteur (ECAPA) "
     "uniquement, pas face à un auditeur humain."
 )
+
+WAVEFORMS_HEIGHT = 220
 
 
 class MainWindow(QMainWindow):
@@ -87,6 +89,8 @@ class MainWindow(QMainWindow):
         self.progress_bar.hide()
         self.status = QLabel()
 
+        self.waveforms = WaveformView()
+        self.waveforms.setFixedHeight(WAVEFORMS_HEIGHT)
         self.results = ReportView()
         self.spectrograms = SpectrogramView()
         self.f0_view = F0View()
@@ -128,6 +132,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.histograms, "Distributions")
         right = QVBoxLayout()
         right.addWidget(self.player)
+        right.addWidget(self.waveforms)
         right.addWidget(self.tabs, 1)
         right.addWidget(scope)
 
@@ -158,6 +163,7 @@ class MainWindow(QMainWindow):
         for view in (self.spectrograms, self.f0_view, self.histograms):
             view.clear()
         self.player.set_audio(self.original, None)
+        self.waveforms.show(self.original)
         self.file_label.setText(f"{path.name} — {self.original.duration:.1f} s, {self.original.sample_rate} Hz")
 
     def run_anonymization(self) -> None:
@@ -185,7 +191,10 @@ class MainWindow(QMainWindow):
     def wait_for_worker(self) -> None:
         """Block until the current run is over (used by scripts and tests)."""
         if self._thread is not None:
-            self._thread.wait()
+            # The worker's signals are delivered by this thread's event loop: blocking on
+            # QThread.wait() alone would keep the thread from ever being told to quit.
+            while not self._thread.wait(10):
+                QApplication.processEvents()
             QApplication.processEvents()
 
     def _on_finished(self, anonymized: Audio, report: Report, spectrograms) -> None:
@@ -199,6 +208,7 @@ class MainWindow(QMainWindow):
         self.f0_view.show(report)
         self.histograms.show(report)
         self.player.set_audio(self.original, anonymized)
+        self.waveforms.show(self.original, anonymized)
 
     def _on_failed(self, message: str) -> None:
         self._set_busy(False)

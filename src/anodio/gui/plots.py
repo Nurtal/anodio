@@ -6,7 +6,8 @@ import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 
-from anodio.core import Report
+from anodio.core import Audio, Report
+from anodio.core.features import waveform_envelope
 
 Spectrogram = tuple[np.ndarray, np.ndarray, np.ndarray]  # times, frequencies, dB
 MAX_COLUMNS = 2000
@@ -22,6 +23,26 @@ class _Canvas(FigureCanvasQTAgg):
 
     def clear(self) -> None:
         self.figure.clear()
+        self.draw_idle()
+
+
+class WaveformView(_Canvas):
+    """Waveform of the Original, to check that the right file was loaded, then of the Anonymized below it."""
+
+    def show(self, original: Audio, anonymized: Audio | None = None) -> None:  # type: ignore[override]
+        self.figure.clear()
+        shown = [(original, "Original", ORIGINAL_COLOR)]
+        if anonymized is not None:
+            shown.append((anonymized, "Anonymisé", ANONYMIZED_COLOR))
+        axes = self.figure.subplots(len(shown), 1, sharex=True, sharey=True, squeeze=False)[:, 0]
+        for ax, (audio, title, color) in zip(axes, shown):
+            # The min / max envelope per column keeps a 5 min recording as quick to draw as a short one.
+            times, low, high = waveform_envelope(audio, MAX_COLUMNS)
+            ax.fill_between(times, low, high, color=color, linewidth=0.5)
+            ax.set_title(title, fontsize=8, loc="left")
+            ax.set_xlim(0, audio.duration)
+            ax.tick_params(labelsize=7)
+        axes[-1].set_xlabel("Temps (s)", fontsize=8)
         self.draw_idle()
 
 
