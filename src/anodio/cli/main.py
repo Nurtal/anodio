@@ -12,12 +12,12 @@ import argparse
 import csv
 import json
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from anodio.core import (
     DEFAULT_THRESHOLDS,
-    STAGES,
     AnodioError,
     Params,
     Report,
@@ -30,6 +30,7 @@ from anodio.core import (
     load_wav,
     random_seed,
     save_wav,
+    stage_names,
 )
 from anodio.core.models import (
     DEFAULT_WHISPER_SIZE,
@@ -47,7 +48,7 @@ load_transcriber = WhisperTranscriber
 VERDICT_TEXT = {True: "réussi", False: "échec", None: "non jugé"}
 
 
-@dataclass
+@dataclass(frozen=True)
 class Processing:
     """Everything but the Seed that determines how a file is processed."""
 
@@ -58,10 +59,14 @@ class Processing:
     transcriber: Transcriber | None
 
     def params(self, seed: int) -> Params:
-        try:
-            return draw_params(seed, overrides=self.overrides, stages=self.stages)
-        except ValueError as exc:
-            raise AnodioError(str(exc)) from exc
+        return _draw_params(seed, self.overrides, self.stages)
+
+
+def _draw_params(seed: int, overrides: dict[str, float], stages: tuple[str, ...]) -> Params:
+    try:
+        return draw_params(seed, overrides=overrides, stages=stages)
+    except ValueError as exc:
+        raise AnodioError(str(exc)) from exc
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -69,7 +74,7 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     one = sub.add_parser("anonymize", help="Anonymiser un fichier .wav.")
-    one.add_argument("input", type=Path, help="Fichier .wav original.")
+    one.add_argument("original", type=Path, help="Fichier .wav original.")
     one.add_argument("--seed", type=int, default=None, help="Seed (tirée au hasard si absente).")
     one.add_argument("--out-dir", type=Path, default=None, help="Dossier de sortie (par défaut : celui de l'original).")
     _add_processing_arguments(one)
@@ -78,7 +83,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "batch",
         help="Anonymiser tous les .wav d'un dossier. Le Speaker d'un fichier est le nom de son sous-dossier.",
     )
-    batch.add_argument("input", type=Path, help="Dossier du corpus (corpus/<speaker>/*.wav).")
+    batch.add_argument("corpus", type=Path, help="Dossier du corpus (corpus/<speaker>/*.wav).")
     batch.add_argument("--out-dir", type=Path, required=True, help="Dossier de sortie (même arborescence).")
     batch.add_argument("--seed", type=int, default=None, help="Seed commune (ou de repli avec --seed-map).")
     batch.add_argument("--seed-map", type=Path, default=None, help="CSV « speaker,seed » : une Seed par Speaker.")
@@ -88,7 +93,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "evaluate-corpus",
         help="Corpus evaluation : EER de l'ASV attacker (baseline, ignorant, lazy-informed) et agrégats d'utilité.",
     )
-    corpus.add_argument("input", type=Path, help="Dossier du corpus (corpus/<speaker>/*.wav), au moins 2 Speakers.")
+    corpus.add_argument("corpus", type=Path, help="Dossier du corpus (corpus/<speaker>/*.wav), au moins 2 Speakers.")
     corpus.add_argument("--seed", type=int, default=None, help="Seed commune (ou de repli avec --seed-map).")
     corpus.add_argument("--seed-map", type=Path, default=None, help="CSV « speaker,seed » : une Seed par Speaker.")
     corpus.add_argument(
@@ -125,8 +130,8 @@ def _add_processing_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--stages",
-        default=",".join(STAGES),
-        help=f"Stages actifs, séparés par des virgules (défaut : {','.join(STAGES)}).",
+        default=",".join(stage_names()),
+        help=f"Stages actifs, séparés par des virgules (défaut : {','.join(stage_names())}).",
     )
     parser.add_argument(
         "--threshold",
@@ -154,12 +159,17 @@ def _processing_from_args(args: argparse.Namespace) -> Processing:
             raise AnodioError(f"Override invalide « {item} » : attendu PARAM=VALEUR.")
         overrides[name.strip()] = _number(name, value)
     stages = tuple(s.strip() for s in args.stages.split(",") if s.strip())
-    processing = Processing(overrides, stages, _thresholds_from_args(args), None, None)
-    for name in processing.params(0).outside_safe_ranges():
+    thresholds = _thresholds_from_args(args)
+    # Everything the user typed is checked before the models, which are slow to load.
+    for name in _draw_params(0, overrides, stages).outside_safe_ranges():
         print(f"Attention : {name} = {overrides[name]} est hors de sa Safe range.", file=sys.stderr)
-    processing.embedder = None if args.no_privacy else load_embedder()
-    processing.transcriber = None if args.no_content else load_transcriber(args.whisper_size)
-    return processing
+    return Processing(
+        overrides,
+        stages,
+        thresholds,
+        embedder=None if args.no_privacy else load_embedder(),
+        transcriber=None if args.no_content else load_transcriber(args.whisper_size),
+    )
 
 
 def _thresholds_from_args(args: argparse.Namespace) -> dict[str, dict[str, float]]:
@@ -182,8 +192,8 @@ def _number(name: str, value: str) -> float:
         raise AnodioError(f"Valeur non numérique pour {name} : {value}") from exc
 
 
-def _process_file(input_path: Path, out_dir: Path, params: Params, processing: Processing) -> Report:
-    original = load_wav(input_path)
+def _process_file(original_path: Path, out_dir: Path, params: Params, processing: Processing) -> Report:
+    original = load_wav(original_path)
     anonymized = anonymize(original, params)
     report = evaluate(
         original,
@@ -194,7 +204,7 @@ def _process_file(input_path: Path, out_dir: Path, params: Params, processing: P
         transcriber=processing.transcriber,
     )
     out_dir.mkdir(parents=True, exist_ok=True)
-    stem = f"{input_path.stem}_anon"
+    stem = f"{original_path.stem}_anon"
     save_wav(out_dir / f"{stem}.wav", anonymized)
     (out_dir / f"{stem}.json").write_text(report.to_json(), encoding="utf-8")
     return report
@@ -203,9 +213,9 @@ def _process_file(input_path: Path, out_dir: Path, params: Params, processing: P
 def _anonymize_one(args: argparse.Namespace) -> int:
     processing = _processing_from_args(args)
     params = processing.params(random_seed() if args.seed is None else args.seed)
-    out_dir = args.out_dir or args.input.parent
-    report = _process_file(args.input, out_dir, params, processing)
-    print(f"{out_dir / args.input.stem}_anon.wav (seed {params.seed}) — verdict global : {VERDICT_TEXT[report.verdict]}")
+    out_dir = args.out_dir or args.original.parent
+    report = _process_file(args.original, out_dir, params, processing)
+    print(f"{out_dir / args.original.stem}_anon.wav (seed {params.seed}) — verdict global : {VERDICT_TEXT[report.verdict]}")
     for axis, failure in report.failures:
         print(f"  [{axis}] {failure}")
     return 0
@@ -219,26 +229,37 @@ def _read_seed_map(path: Path) -> dict[str, int]:
         raise AnodioError(f"Fichier de Seeds illisible ({path}) : attendu un CSV « speaker,seed ». {exc}") from exc
 
 
+def _seed_resolver(args: argparse.Namespace) -> Callable[[str], int]:
+    """`seed_for(speaker)`: the Speaker's Seed in --seed-map, else --seed, else one random Seed for all."""
+    seed_map = _read_seed_map(args.seed_map) if args.seed_map else {}
+    fallback_seed = args.seed if args.seed is not None else (None if seed_map else random_seed())
+
+    def seed_for(speaker: str) -> int:
+        seed = seed_map.get(speaker, fallback_seed)
+        if seed is None:
+            raise AnodioError(f"Le Speaker « {speaker} » n'a pas de Seed dans {args.seed_map}.")
+        return seed
+
+    return seed_for
+
+
 def _speaker(root: Path, path: Path) -> str:
     relative = path.relative_to(root)
     return relative.parts[0] if len(relative.parts) > 1 else path.stem
 
 
 def _anonymize_batch(args: argparse.Namespace) -> int:
-    if not args.input.is_dir():
-        raise AnodioError(f"Dossier introuvable : {args.input}")
-    seed_map = _read_seed_map(args.seed_map) if args.seed_map else {}
-    fallback_seed = args.seed if args.seed is not None else (None if seed_map else random_seed())
+    if not args.corpus.is_dir():
+        raise AnodioError(f"Dossier introuvable : {args.corpus}")
+    seed_for = _seed_resolver(args)
     processing = _processing_from_args(args)
     entries = []
-    for path in sorted(args.input.rglob("*.wav")):
-        speaker = _speaker(args.input, path)
-        relative = path.relative_to(args.input)
+    for path in sorted(args.corpus.rglob("*.wav")):
+        speaker = _speaker(args.corpus, path)
+        relative = path.relative_to(args.corpus)
         entry: dict = {"file": str(relative), "speaker": speaker}
         try:
-            seed = seed_map.get(speaker, fallback_seed)
-            if seed is None:
-                raise AnodioError(f"Le Speaker « {speaker} » n'a pas de Seed dans {args.seed_map}.")
+            seed = seed_for(speaker)
             entry["seed"] = seed
             report = _process_file(path, args.out_dir / relative.parent, processing.params(seed), processing)
             entry["verdict"] = report.verdict
@@ -266,17 +287,15 @@ def _anonymize_batch(args: argparse.Namespace) -> int:
 
 
 def _evaluate_corpus(args: argparse.Namespace) -> int:
-    if not args.input.is_dir():
-        raise AnodioError(f"Dossier introuvable : {args.input}")
+    if not args.corpus.is_dir():
+        raise AnodioError(f"Dossier introuvable : {args.corpus}")
     if args.no_privacy:
         raise AnodioError("La Corpus evaluation mesure la Privacy : --no-privacy n'a pas de sens ici.")
-    seed_map = _read_seed_map(args.seed_map) if args.seed_map else {}
-    fallback_seed = args.seed if args.seed is not None else (None if seed_map else random_seed())
+    seed_for = _seed_resolver(args)
     recordings = []
-    for path in sorted(args.input.rglob("*.wav")):
-        speaker = _speaker(args.input, path)
-        if speaker not in seed_map and fallback_seed is None:
-            raise AnodioError(f"Le Speaker « {speaker} » n'a pas de Seed dans {args.seed_map}.")
+    for path in sorted(args.corpus.rglob("*.wav")):
+        speaker = _speaker(args.corpus, path)
+        seed_for(speaker)  # a Speaker without a Seed stops the evaluation before any computation
         recordings.append((speaker, load_wav(path)))
     processing = _processing_from_args(args)
     assert processing.embedder is not None
@@ -284,7 +303,7 @@ def _evaluate_corpus(args: argparse.Namespace) -> int:
     try:
         result = evaluate_corpus(
             recordings,
-            params_for=lambda speaker: processing.params(seed_map.get(speaker, fallback_seed)),  # type: ignore[arg-type]
+            params_for=lambda speaker: processing.params(seed_for(speaker)),
             attacker_seed=attacker_seed,
             embedder=processing.embedder,
             transcriber=processing.transcriber,
@@ -294,13 +313,12 @@ def _evaluate_corpus(args: argparse.Namespace) -> int:
     except ValueError as exc:
         raise AnodioError(str(exc)) from exc
     print(file=sys.stderr)
-    text = json.dumps(result, indent=2, ensure_ascii=False)
     if args.output:
-        args.output.write_text(text, encoding="utf-8")
-        for condition, values in result["privacy"].items():
-            print(f"EER {condition} : {100 * values['eer']:.1f} %")
+        args.output.write_text(result.to_json(), encoding="utf-8")
+        for condition, attack in result.privacy.conditions().items():
+            print(f"EER {condition} : {100 * attack.eer:.1f} %")
     else:
-        print(text)
+        print(result.to_json())
     return 0
 
 

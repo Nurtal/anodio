@@ -8,7 +8,7 @@ import numpy as np
 
 from anodio.core.audio import Audio
 from anodio.core.params import Params
-from anodio.core.stages import mcadams, psola, vtln
+from anodio.core.stages import stage_named
 
 
 class Anonymizer(Protocol):
@@ -19,19 +19,12 @@ class Anonymizer(Protocol):
 
 def chain(original: Audio, params: Params) -> Audio:
     """Apply the enabled Stages in order. Pure: same Original and Params, same output."""
-    samples = original.samples.astype(np.float64)
-    sr = original.sample_rate
-    for stage in params.stages:
-        if stage == "mcadams":
-            samples = mcadams(samples, sr, params.mcadams_alpha)
-        elif stage == "psola":
-            rng = np.random.default_rng([params.seed, 1])
-            samples = psola(samples, sr, params.pitch_semitones, params.formant_ratio, rng)
-        elif stage == "vtln":
-            samples = vtln(samples, sr, params.vtln_alpha)
     if not params.stages:
-        return Audio(original.samples.copy(), sr)
-    return Audio(_match_peak(samples, original.samples), sr)
+        return Audio(original.samples.copy(), original.sample_rate)
+    samples = original.samples.astype(np.float64)
+    for name in params.stages:
+        samples = stage_named(name).apply(samples, original.sample_rate, params.values, params.seed)
+    return Audio(_match_peak(samples, original.samples), original.sample_rate)
 
 
 anonymize: Anonymizer = chain

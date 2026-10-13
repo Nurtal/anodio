@@ -55,35 +55,50 @@ def test_eer_of_overlapping_scores():
 
 
 def test_three_attack_conditions_are_reported(result):
-    assert set(result["privacy"]) == {"baseline", "ignorant", "lazy_informed"}
-    for condition in result["privacy"].values():
-        assert 0 <= condition["eer"] <= 1
+    conditions = result.privacy.conditions()
+
+    assert set(conditions) == {"baseline", "ignorant", "lazy_informed"}
+    for attack in conditions.values():
+        assert 0 <= attack.eer <= 1
 
 
 def test_original_speakers_are_recognised(result):
-    assert result["privacy"]["baseline"]["eer"] < 0.2
+    assert result.privacy.baseline.eer < 0.2
 
 
 def test_trials_never_pair_a_recording_with_itself(result):
     n = len(SPEAKERS) * TAKES
     same_speaker_pairs = len(SPEAKERS) * TAKES * (TAKES - 1)
-    privacy = result["privacy"]
-    assert privacy["baseline"]["target_trials"] == same_speaker_pairs // 2
-    assert privacy["baseline"]["target_trials"] + privacy["baseline"]["nontarget_trials"] == n * (n - 1) // 2
-    for condition in ("ignorant", "lazy_informed"):
-        assert privacy[condition]["target_trials"] == same_speaker_pairs
-        assert privacy[condition]["target_trials"] + privacy[condition]["nontarget_trials"] == n * (n - 1)
+    baseline = result.privacy.baseline
+    assert baseline.target_trials == same_speaker_pairs // 2
+    assert baseline.target_trials + baseline.nontarget_trials == n * (n - 1) // 2
+    for attack in (result.privacy.ignorant, result.privacy.lazy_informed):
+        assert attack.target_trials == same_speaker_pairs
+        assert attack.target_trials + attack.nontarget_trials == n * (n - 1)
 
 
 def test_corpus_counts_and_utility_aggregates(result):
-    assert result["speakers"] == len(SPEAKERS)
-    assert result["recordings"] == len(SPEAKERS) * TAKES
-    assert result["content"]["mean_wer"] == 0
-    jitter = result["clinical"]["jitter_local_pct"]
-    assert set(jitter) == {"kind", "mean", "median", "max", "pass_rate"}
-    assert jitter["kind"] == "relative"
-    assert 0 <= jitter["pass_rate"] <= 1
-    assert result["clinical"]["hnr_db"]["kind"] == "absolute"
+    assert result.speakers == len(SPEAKERS)
+    assert result.recordings == len(SPEAKERS) * TAKES
+    assert result.content.mean_wer == 0
+    jitter = result.clinical["jitter_local_pct"]
+    assert jitter.kind == "relative"
+    assert 0 <= jitter.pass_rate <= 1
+    assert result.clinical["hnr_db"].kind == "absolute"
+
+
+def test_corpus_evaluation_serializes_to_the_documented_json(result):
+    data = json.loads(result.to_json())
+
+    assert list(data) == [
+        "speakers", "recordings", "attacker_seed", "embedder", "privacy", "content", "clinical", "axis_pass_rates",
+    ]
+    assert list(data["privacy"]) == ["baseline", "ignorant", "lazy_informed"]
+    assert set(data["privacy"]["baseline"]) == {
+        "eer", "target_trials", "nontarget_trials", "mean_target_score", "mean_nontarget_score",
+    }
+    assert set(data["content"]) == {"mean_wer", "judged_recordings"}
+    assert set(data["clinical"]["jitter_local_pct"]) == {"kind", "mean", "median", "max", "pass_rate"}
 
 
 def test_cli_corpus_evaluation_smoke(tmp_path, monkeypatch):
@@ -102,3 +117,19 @@ def test_cli_corpus_evaluation_smoke(tmp_path, monkeypatch):
     assert data["speakers"] == 2
     assert data["attacker_seed"] == 7
     assert {"baseline", "ignorant", "lazy_informed"} <= set(data["privacy"])
+
+
+def test_cli_corpus_evaluation_stops_on_a_speaker_without_a_seed(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(cli, "load_embedder", SpectrumEmbedder)
+    monkeypatch.setattr(cli, "load_transcriber", lambda size: ScriptedTranscriber(default="bonjour"))
+    root = tmp_path / "corpus"
+    for i, (speaker, audio) in enumerate(_recordings()[: 2 * TAKES]):
+        (root / speaker).mkdir(parents=True, exist_ok=True)
+        save_wav(root / speaker / f"take{i}.wav", audio)
+    seeds = tmp_path / "seeds.csv"
+    seeds.write_text("speaker,seed\nana,11\n")
+
+    exit_code = main(["evaluate-corpus", str(root), "--seed-map", str(seeds)])
+
+    assert exit_code == 1
+    assert "ben" in capsys.readouterr().err

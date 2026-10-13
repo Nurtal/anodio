@@ -6,6 +6,7 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QDoubleSpinBox, QFormLayout, QGroupBox, QLabel
 
 from anodio.core import DEFAULT_THRESHOLDS
+from anodio.core.thresholds import DeviationKey, DeviationKind
 from anodio.gui.report_view import AXIS_LABELS, CLINICAL_LABELS
 
 KEY_LABELS = {
@@ -18,11 +19,11 @@ KEY_LABELS = {
 
 
 def key_label(key: str) -> str:
-    if ":" in key:
-        kind, feature = key.split(":", 1)
-        unit = "écart absolu max." if kind.startswith("max_absolute") else "écart relatif max."
-        return f"{CLINICAL_LABELS.get(feature, feature)} — {unit}"
-    return KEY_LABELS.get(key, key)
+    deviation = DeviationKey.parse(key)
+    if deviation is None or deviation.feature is None:
+        return KEY_LABELS.get(key, key)
+    unit = "écart absolu max." if deviation.kind is DeviationKind.ABSOLUTE else "écart relatif max."
+    return f"{CLINICAL_LABELS.get(deviation.feature, deviation.feature)} — {unit}"
 
 
 class ThresholdsPanel(QGroupBox):

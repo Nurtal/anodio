@@ -1,6 +1,5 @@
 """Waveform of the Original, shown as soon as it is loaded, then of the Anonymized recording."""
 
-import os
 import time
 
 import numpy as np
@@ -9,8 +8,6 @@ from fakes import ScriptedTranscriber, SpectrumEmbedder
 
 from anodio.core import Audio, save_wav
 from anodio.core.features import waveform_envelope
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 FIVE_MINUTES = 300
 
@@ -37,13 +34,6 @@ def test_long_recording_is_reduced_to_a_min_max_envelope_that_keeps_its_peaks():
     assert low.min() == np.float32(-0.7)
     assert times[np.argmax(high)] == pytest.approx(40_000 / 16000, abs=audio.duration / len(times))
     assert 0 <= times[0] and times[-1] < audio.duration
-
-
-@pytest.fixture(scope="module")
-def app():
-    from PySide6.QtWidgets import QApplication
-
-    return QApplication.instance() or QApplication([])
 
 
 def _traces(view):

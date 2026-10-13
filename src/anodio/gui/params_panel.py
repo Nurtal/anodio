@@ -16,27 +16,19 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from anodio.core import SAFE_RANGES, STAGES, Params, draw_params, random_seed
+from anodio.core import Params, draw_params, random_seed
+from anodio.core.stages import ParamSpec, chain_stages
 
-STAGE_LABELS = {"mcadams": "McAdams", "psola": "Pitch / formants (PSOLA)", "vtln": "VTLN"}
-
-# name: (label, slider min, slider max, Stage)
-PARAM_SPECS = {
-    "mcadams_alpha": ("Coefficient McAdams α", 0.4, 1.0, "mcadams"),
-    "pitch_semitones": ("Décalage F0 (demi-tons)", -8.0, 8.0, "psola"),
-    "formant_ratio": ("Ratio de formants", 0.75, 1.25, "psola"),
-    "vtln_alpha": ("Warping VTLN", -0.25, 0.25, "vtln"),
-}
 STEPS = 200
 
 
 class ParamSlider(QWidget):
     changed = Signal()
 
-    def __init__(self, name: str) -> None:
+    def __init__(self, spec: ParamSpec) -> None:
         super().__init__()
-        label, self.low, self.high, _ = PARAM_SPECS[name]
-        self.name = name
+        self.spec = spec
+        self.low, self.high = spec.bounds
         self.lock = QCheckBox("Seed")
         self.lock.setChecked(True)
         self.lock.setToolTip("Coché : valeur tirée de la Seed. Décoché : Override manuel.")
@@ -49,12 +41,12 @@ class ParamSlider(QWidget):
         self.lock.toggled.connect(self.changed)
         self.slider.valueChanged.connect(self._refresh_label)
         self.slider.valueChanged.connect(self.changed)
-        ranges = " ∪ ".join(f"[{lo:g} ; {hi:g}]" for lo, hi in SAFE_RANGES[name])
+        ranges = " ∪ ".join(f"[{lo:g} ; {hi:g}]" for lo, hi in spec.safe_ranges)
         self.setToolTip(f"Safe range : {ranges}")
 
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 0, 0, 0)
-        row.addWidget(QLabel(label), 2)
+        row.addWidget(QLabel(spec.label), 2)
         row.addWidget(self.slider, 3)
         row.addWidget(self.value_label)
         row.addWidget(self.lock)
@@ -74,7 +66,7 @@ class ParamSlider(QWidget):
 
     def _refresh_label(self) -> None:
         value = self.value()
-        outside = not any(lo <= value <= hi for lo, hi in SAFE_RANGES[self.name])
+        outside = not self.spec.is_safe(value)
         self.value_label.setText(f"{value:+.3f}" + ("  ⚠ hors plage" if outside else ""))
         self.value_label.setStyleSheet("color: #c0392b;" if outside else "")
 
@@ -99,13 +91,15 @@ class ParamsPanel(QGroupBox):
         seed_row.addWidget(self.seed_box, 1)
         seed_row.addWidget(random_button)
 
-        self.stage_boxes = {stage: QCheckBox(STAGE_LABELS[stage]) for stage in STAGES}
+        stages = chain_stages()
+        self.stage_boxes = {stage.name: QCheckBox(stage.label) for stage in stages}
         stages_row = QGridLayout()
         for i, box in enumerate(self.stage_boxes.values()):
             box.setChecked(True)
             stages_row.addWidget(box, 0, i)
 
-        self.sliders = {name: ParamSlider(name) for name in PARAM_SPECS}
+        self.sliders = {spec.name: ParamSlider(spec) for stage in stages for spec in stage.params}
+        self._stage_of = {spec.name: stage.name for stage in stages for spec in stage.params}
         layout = QVBoxLayout(self)
         layout.addLayout(seed_row)
         layout.addWidget(QLabel("Stages actifs :"))
@@ -133,4 +127,4 @@ class ParamsPanel(QGroupBox):
 
     def _sync_stage_enabled(self) -> None:
         for name, slider in self.sliders.items():
-            slider.setEnabled(self.stage_boxes[PARAM_SPECS[name][3]].isChecked())
+            slider.setEnabled(self.stage_boxes[self._stage_of[name]].isChecked())

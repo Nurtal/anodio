@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -28,6 +28,7 @@ from anodio.core.features import (
 from anodio.core.models import SpeakerEmbedder, Transcriber
 from anodio.core.params import Params
 from anodio.core.report import AxisResult, Measure, Report
+from anodio.core.thresholds import ClinicalThresholds, DeviationKind, DeviationLimit
 from anodio.core.timing import SILENCE_DB, pauses
 from anodio.core.wer import word_error_rate
 
@@ -223,28 +224,32 @@ def _measure_clinical(original: Audio, anonymized: Audio, contour_o: F0Contour, 
     return measures
 
 
-def clinical_deviation(m: Measures, feature: str, t: dict[str, float]) -> tuple[float | None, float, bool]:
-    """(deviation, limit, absolute?) of a Clinical feature under the given Thresholds."""
+@dataclass(frozen=True)
+class Deviation:
+    """How far a Clinical feature moved, and the limit it is judged against."""
+
+    value: float | None  # None when the feature could not be measured
+    limit: DeviationLimit
+
+
+def clinical_deviation(m: Measures, feature: str, thresholds: ClinicalThresholds) -> Deviation:
+    limit = thresholds.limit_for(feature)
     original, anonymized = m[f"{feature}.original"], m[f"{feature}.anonymized"]
-    absolute = f"max_absolute_deviation:{feature}" in t
-    if absolute:
-        limit = t[f"max_absolute_deviation:{feature}"]
-    else:
-        limit = t.get(f"max_relative_deviation:{feature}", t["max_relative_deviation"])
     if original is None or anonymized is None:
-        return None, limit, absolute
+        return Deviation(None, limit)
     o, a = float(original), float(anonymized)
-    if absolute:
-        return abs(a - o), limit, absolute
-    return (0.0 if o == a else abs(a - o) / max(abs(o), 1e-9)), limit, absolute
+    if limit.kind is DeviationKind.ABSOLUTE:
+        return Deviation(abs(a - o), limit)
+    return Deviation(0.0 if o == a else abs(a - o) / max(abs(o), 1e-9), limit)
 
 
 def _with_clinical_deviations(m: Measures, t: dict[str, float]) -> Measures:
     """Measures plus each feature's deviation, relative or absolute depending on its Threshold."""
+    thresholds = ClinicalThresholds(t)
     measures = {k: v for k, v in m.items() if not k.endswith(("relative_deviation", "absolute_deviation"))}
     for feature in clinical_feature_names(m):
-        deviation, _, absolute = clinical_deviation(m, feature, t)
-        measures[f"{feature}.{'absolute' if absolute else 'relative'}_deviation"] = deviation
+        deviation = clinical_deviation(m, feature, thresholds)
+        measures[f"{feature}.{deviation.limit.kind}_deviation"] = deviation.value
     return measures
 
 
@@ -253,16 +258,18 @@ def clinical_feature_names(m: Measures) -> list[str]:
 
 
 def _judge_clinical(m: Measures, t: dict[str, float]) -> list[str]:
+    thresholds = ClinicalThresholds(t)
     failures = []
     for feature in clinical_feature_names(m):
-        deviation, limit, absolute = clinical_deviation(m, feature, t)
-        if deviation is None:
+        deviation = clinical_deviation(m, feature, thresholds)
+        value, limit = deviation.value, deviation.limit.value
+        if value is None:
             failures.append(f"{feature} : mesure impossible.")
-        elif deviation > limit:
-            if absolute:
-                failures.append(f"{feature} : écart de {deviation:.1f} (seuil : {limit:g}).")
+        elif value > limit:
+            if deviation.limit.kind is DeviationKind.ABSOLUTE:
+                failures.append(f"{feature} : écart de {value:.1f} (seuil : {limit:g}).")
             else:
-                failures.append(f"{feature} : écart relatif de {100 * deviation:.0f} % (seuil : {100 * limit:.0f} %).")
+                failures.append(f"{feature} : écart relatif de {100 * value:.0f} % (seuil : {100 * limit:.0f} %).")
     return failures
 
 

@@ -1,6 +1,13 @@
-"""Stages of the anonymization Chain. Each one is a pure function of (samples, sample_rate, param)."""
+"""Stages of the anonymization Chain. Each one is a pure function of (samples, sample_rate, param).
+
+`REGISTRY`, at the end of this module, is the only place that lists the Stages: the Params,
+the Chain, the CLI and the GUI are all derived from it.
+"""
 
 from __future__ import annotations
+
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 
 import numpy as np
 from scipy.linalg import solve_toeplitz
@@ -215,3 +222,111 @@ def _match_envelope(output: np.ndarray, reference: np.ndarray, sample_rate: int)
     out = np.sqrt(np.maximum(uniform_filter1d(output**2, size), 0.0))
     gain = np.where(out > 1e-8, ref / np.maximum(out, 1e-8), 0.0)
     return output * np.minimum(gain, 10.0)
+
+
+@dataclass(frozen=True)
+class ParamSpec:
+    """A Param of a Stage."""
+
+    name: str
+    label: str
+    # Intervals in which the Param is drawn from the Seed. The gaps around the identity
+    # exclude values too weak to anonymize.
+    safe_ranges: tuple[tuple[float, float], ...]
+    # Value for which the Stage leaves the signal unchanged.
+    identity: float
+    # Widest values an Override may take.
+    bounds: tuple[float, float]
+
+    def is_safe(self, value: float) -> bool:
+        return any(low <= value <= high for low, high in self.safe_ranges)
+
+
+@dataclass(frozen=True)
+class Stage:
+    name: str
+    label: str
+    # Rank in the Chain, which need not be the rank in the registry.
+    position: int
+    params: tuple[ParamSpec, ...]
+    # (samples, sample rate, Param values by name, Seed) -> samples
+    apply: Callable[[np.ndarray, int, Mapping[str, float], int], np.ndarray]
+
+
+def _apply_mcadams(samples: np.ndarray, sample_rate: int, values: Mapping[str, float], seed: int) -> np.ndarray:
+    return mcadams(samples, sample_rate, values["mcadams_alpha"])
+
+
+def _apply_psola(samples: np.ndarray, sample_rate: int, values: Mapping[str, float], seed: int) -> np.ndarray:
+    rng = np.random.default_rng([seed, 1])
+    return psola(samples, sample_rate, values["pitch_semitones"], values["formant_ratio"], rng)
+
+
+def _apply_vtln(samples: np.ndarray, sample_rate: int, values: Mapping[str, float], seed: int) -> np.ndarray:
+    return vtln(samples, sample_rate, values["vtln_alpha"])
+
+
+# Params are drawn from the Seed in the order of this registry: append a new Stage at the
+# end, whatever its `position` in the Chain, so that every Seed keeps its Pseudo-voice.
+REGISTRY: tuple[Stage, ...] = (
+    Stage(
+        name="mcadams",
+        label="McAdams",
+        position=20,
+        params=(
+            ParamSpec(
+                "mcadams_alpha", "Coefficient McAdams α", safe_ranges=((0.5, 0.9),), identity=1.0, bounds=(0.4, 1.0)
+            ),
+        ),
+        apply=_apply_mcadams,
+    ),
+    Stage(
+        name="psola",
+        label="Pitch / formants (PSOLA)",
+        position=10,
+        params=(
+            ParamSpec(
+                "pitch_semitones",
+                "Décalage F0 (demi-tons)",
+                safe_ranges=((-5.0, -2.0), (2.0, 5.0)),
+                identity=0.0,
+                bounds=(-8.0, 8.0),
+            ),
+            ParamSpec(
+                "formant_ratio",
+                "Ratio de formants",
+                safe_ranges=((0.85, 0.95), (1.05, 1.15)),
+                identity=1.0,
+                bounds=(0.75, 1.25),
+            ),
+        ),
+        apply=_apply_psola,
+    ),
+    Stage(
+        name="vtln",
+        label="VTLN",
+        position=30,
+        params=(
+            ParamSpec(
+                "vtln_alpha",
+                "Warping VTLN",
+                safe_ranges=((-0.15, -0.05), (0.05, 0.15)),
+                identity=0.0,
+                bounds=(-0.25, 0.25),
+            ),
+        ),
+        apply=_apply_vtln,
+    ),
+)
+
+
+def chain_stages() -> tuple[Stage, ...]:
+    """The registered Stages, in the order the Chain applies them."""
+    return tuple(sorted(REGISTRY, key=lambda stage: stage.position))
+
+
+def stage_named(name: str) -> Stage:
+    for stage in REGISTRY:
+        if stage.name == name:
+            return stage
+    raise ValueError(f"Stage inconnu : {name}")

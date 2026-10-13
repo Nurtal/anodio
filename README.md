@@ -87,3 +87,5 @@ uv run mypy src
 ```
 
 Le cœur (`anodio.core`) n'a aucune dépendance à Qt. Son API publique est `draw_params`, `anonymize`, `evaluate`, `apply_thresholds` et `evaluate_corpus`. L'interface graphique et la ligne de commande sont de fines couches au-dessus.
+
+Pour ajouter un Stage à la Chain, il suffit d'une entrée dans `REGISTRY` (`src/anodio/core/stages.py`) : les Params, la ligne de commande et l'interface graphique en découlent.

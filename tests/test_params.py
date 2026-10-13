@@ -2,13 +2,13 @@ import dataclasses
 
 import pytest
 
-from anodio.core import IDENTITY, SAFE_RANGES, STAGES, draw_params
+from anodio.core import draw_params, param_specs, stage_names
 
 PARAM_NAMES = ["mcadams_alpha", "pitch_semitones", "formant_ratio", "vtln_alpha"]
 
 
 def _in_safe_range(name, value):
-    return any(low <= value <= high for low, high in SAFE_RANGES[name])
+    return param_specs()[name].is_safe(value)
 
 
 @pytest.mark.parametrize("seed", range(50))
@@ -50,11 +50,12 @@ def test_override_replaces_only_its_param():
     overridden = draw_params(9, overrides={"pitch_semitones": 3.5})
 
     assert overridden.pitch_semitones == 3.5
-    assert dataclasses.replace(overridden, pitch_semitones=drawn.pitch_semitones) == drawn
+    restored = {**overridden.values, "pitch_semitones": drawn.pitch_semitones}
+    assert dataclasses.replace(overridden, values=restored) == drawn
 
 
 def test_all_stages_enabled_by_default():
-    assert draw_params(0).stages == STAGES
+    assert draw_params(0).stages == stage_names()
 
 
 def test_stages_can_be_selected():
@@ -73,6 +74,7 @@ def test_out_of_safe_range_override_is_flagged():
 
 
 def test_identity_params_are_outside_safe_ranges():
-    assert set(IDENTITY) == set(PARAM_NAMES)
-    params = draw_params(0, overrides=IDENTITY)
+    identity = {name: spec.identity for name, spec in param_specs().items()}
+    assert set(identity) == set(PARAM_NAMES)
+    params = draw_params(0, overrides=identity)
     assert params.outside_safe_ranges() == PARAM_NAMES

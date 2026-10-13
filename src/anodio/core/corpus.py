@@ -10,16 +10,76 @@ Trials always pair two different recordings.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Sequence
+from dataclasses import asdict, dataclass
 from itertools import combinations, permutations
 
 import numpy as np
 
 from anodio.core.anonymize import anonymize
 from anodio.core.audio import Audio
-from anodio.core.evaluate import clinical_deviation, clinical_feature_names, cosine_similarity, evaluate
+from anodio.core.evaluate import Thresholds, clinical_deviation, clinical_feature_names, cosine_similarity, evaluate
 from anodio.core.models import SpeakerEmbedder, Transcriber
 from anodio.core.params import Params, draw_params
+from anodio.core.report import Report
+from anodio.core.thresholds import ClinicalThresholds
+
+
+@dataclass(frozen=True)
+class AttackResult:
+    """Outcome of the trials of one attack condition."""
+
+    eer: float
+    target_trials: int
+    nontarget_trials: int
+    mean_target_score: float
+    mean_nontarget_score: float
+
+
+@dataclass(frozen=True)
+class PrivacyResult:
+    baseline: AttackResult
+    ignorant: AttackResult
+    lazy_informed: AttackResult
+
+    def conditions(self) -> dict[str, AttackResult]:
+        return {"baseline": self.baseline, "ignorant": self.ignorant, "lazy_informed": self.lazy_informed}
+
+
+@dataclass(frozen=True)
+class ContentSummary:
+    mean_wer: float | None
+    judged_recordings: int
+
+
+@dataclass(frozen=True)
+class ClinicalFeatureSummary:
+    """Deviations of one Clinical feature over the corpus (None when it was never measurable)."""
+
+    kind: str  # "relative" or "absolute"
+    mean: float | None
+    median: float | None
+    max: float | None
+    pass_rate: float | None
+
+
+@dataclass(frozen=True)
+class CorpusEvaluation:
+    speakers: int
+    recordings: int
+    attacker_seed: int
+    embedder: str
+    privacy: PrivacyResult
+    content: ContentSummary | None  # None without a Transcriber
+    clinical: dict[str, ClinicalFeatureSummary]
+    axis_pass_rates: dict[str, float]
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    def to_json(self) -> str:
+        return json.dumps(self.to_dict(), indent=2, ensure_ascii=False)
 
 
 def equal_error_rate(scores: np.ndarray, is_target: np.ndarray) -> float:
@@ -35,16 +95,22 @@ def equal_error_rate(scores: np.ndarray, is_target: np.ndarray) -> float:
     return best
 
 
-def _condition(pairs, enrol, trial, speakers) -> dict:
-    scores = np.array([cosine_similarity(enrol[i], trial[j]) for i, j in pairs])
-    is_target = np.array([speakers[i] == speakers[j] for i, j in pairs])
-    return {
-        "eer": equal_error_rate(scores, is_target),
-        "target_trials": int(is_target.sum()),
-        "nontarget_trials": int((~is_target).sum()),
-        "mean_target_score": float(scores[is_target].mean()),
-        "mean_nontarget_score": float(scores[~is_target].mean()),
-    }
+def _attack(
+    trials: Sequence[tuple[int, int]],
+    enrolment: Sequence[np.ndarray],
+    test: Sequence[np.ndarray],
+    speakers: Sequence[str],
+) -> AttackResult:
+    """Score every (enrolment index, test index) trial; a trial is a target when both are the same Speaker."""
+    scores = np.array([cosine_similarity(enrolment[i], test[j]) for i, j in trials])
+    is_target = np.array([speakers[i] == speakers[j] for i, j in trials])
+    return AttackResult(
+        eer=equal_error_rate(scores, is_target),
+        target_trials=int(is_target.sum()),
+        nontarget_trials=int((~is_target).sum()),
+        mean_target_score=float(scores[is_target].mean()),
+        mean_nontarget_score=float(scores[~is_target].mean()),
+    )
 
 
 def evaluate_corpus(
@@ -53,13 +119,14 @@ def evaluate_corpus(
     attacker_seed: int,
     embedder: SpeakerEmbedder,
     transcriber: Transcriber | None = None,
-    thresholds: dict[str, dict[str, float]] | None = None,
+    thresholds: Thresholds | None = None,
     on_progress: Callable[[int, int], None] | None = None,
-) -> dict:
+) -> CorpusEvaluation:
     speakers = [speaker for speaker, _ in recordings]
     if len(set(speakers)) < 2:
         raise ValueError("La Corpus evaluation demande au moins deux Speakers.")
-    originals, anonymized, attacker, reports = [], [], [], []
+    originals, anonymized, attacker = [], [], []
+    reports: list[Report] = []
     for index, (speaker, audio) in enumerate(recordings):
         params = params_for(speaker)
         anon = anonymize(audio, params)
@@ -73,47 +140,44 @@ def evaluate_corpus(
 
     n = len(recordings)
     ordered = list(permutations(range(n), 2))
-    return {
-        "speakers": len(set(speakers)),
-        "recordings": n,
-        "attacker_seed": attacker_seed,
-        "embedder": embedder.name,
-        "privacy": {
-            "baseline": _condition(list(combinations(range(n), 2)), originals, originals, speakers),
-            "ignorant": _condition(ordered, originals, anonymized, speakers),
-            "lazy_informed": _condition(ordered, attacker, anonymized, speakers),
-        },
-        "content": _content_summary(reports) if transcriber else None,
-        "clinical": _clinical_summary(reports),
-        "axis_pass_rates": {
+    return CorpusEvaluation(
+        speakers=len(set(speakers)),
+        recordings=n,
+        attacker_seed=attacker_seed,
+        embedder=embedder.name,
+        privacy=PrivacyResult(
+            baseline=_attack(list(combinations(range(n), 2)), originals, originals, speakers),
+            ignorant=_attack(ordered, originals, anonymized, speakers),
+            lazy_informed=_attack(ordered, attacker, anonymized, speakers),
+        ),
+        content=_content_summary(reports) if transcriber else None,
+        clinical=_clinical_summary(reports),
+        axis_pass_rates={
             axis: float(np.mean([r.axes[axis].verdict is True for r in reports]))
             for axis in reports[0].axes
             if reports[0].axes[axis].verdict is not None
         },
-    }
+    )
 
 
-def _content_summary(reports) -> dict:
-    wers = [float(r.axes["content"].measures["wer"]) for r in reports if r.axes["content"].measures["wer"] is not None]
-    return {"mean_wer": float(np.mean(wers)) if wers else None, "judged_recordings": len(wers)}
+def _content_summary(reports: Sequence[Report]) -> ContentSummary:
+    wers = [float(wer) for r in reports if (wer := r.axes["content"].measures["wer"]) is not None]
+    return ContentSummary(mean_wer=float(np.mean(wers)) if wers else None, judged_recordings=len(wers))
 
 
-def _clinical_summary(reports) -> dict:
+def _clinical_summary(reports: Sequence[Report]) -> dict[str, ClinicalFeatureSummary]:
+    axes = [report.axes["clinical"] for report in reports]
     summary = {}
-    first = reports[0].axes["clinical"]
-    for feature in clinical_feature_names(first.measures):
-        deviations, limit, absolute = [], 0.0, False
-        for report in reports:
-            axis = report.axes["clinical"]
-            deviation, limit, absolute = clinical_deviation(axis.measures, feature, axis.thresholds)
-            if deviation is not None:
-                deviations.append(deviation)
-        values = np.array(deviations)
-        summary[feature] = {
-            "kind": "absolute" if absolute else "relative",
-            "mean": float(values.mean()) if len(values) else None,
-            "median": float(np.median(values)) if len(values) else None,
-            "max": float(values.max()) if len(values) else None,
-            "pass_rate": float(np.mean(values <= limit)) if len(values) else None,
-        }
+    for feature in clinical_feature_names(axes[0].measures):
+        deviations = [clinical_deviation(axis.measures, feature, ClinicalThresholds(axis.thresholds)) for axis in axes]
+        limit = deviations[-1].limit
+        values = np.array([deviation.value for deviation in deviations if deviation.value is not None])
+        measured = len(values) > 0
+        summary[feature] = ClinicalFeatureSummary(
+            kind=str(limit.kind),
+            mean=float(values.mean()) if measured else None,
+            median=float(np.median(values)) if measured else None,
+            max=float(values.max()) if measured else None,
+            pass_rate=float(np.mean(values <= limit.value)) if measured else None,
+        )
     return summary

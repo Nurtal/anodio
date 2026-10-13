@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from anodio.core import Report
+from anodio.core.evaluate import clinical_feature_names
 
 AXIS_LABELS = {
     "privacy": "Privacy",
@@ -108,7 +109,7 @@ class ReportView(QWidget):
         if clinical is None:
             return
         failing = {failure.split(" :")[0] for failure in clinical.failures}
-        features = [key.removesuffix(".original") for key in clinical.measures if key.endswith(".original")]
+        features = clinical_feature_names(clinical.measures)
         self.clinical_table.setRowCount(len(features))
         for row, name in enumerate(features):
             m = clinical.measures
