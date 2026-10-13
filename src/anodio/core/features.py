@@ -221,7 +221,7 @@ def spectrogram(audio: Audio, max_hz: float = 5000.0) -> tuple[np.ndarray, np.nd
     return times, freqs[keep], db - db.max()
 
 
-def waveform_envelope(audio: Audio, max_columns: int = 2000) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def waveform_envelope(audio: Audio, max_columns: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """(times, minima, maxima) of the samples over at most `max_columns` equal stretches.
 
     Drawing the min / max envelope shows the same picture as drawing every sample, at a

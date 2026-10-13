@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from anodio.core import Params, draw_params, random_seed
+from anodio.core import Params, draw_params, param_specs, random_seed
 from anodio.core.stages import ParamSpec, chain_stages
 
 STEPS = 200
@@ -98,7 +98,7 @@ class ParamsPanel(QGroupBox):
             box.setChecked(True)
             stages_row.addWidget(box, 0, i)
 
-        self.sliders = {spec.name: ParamSlider(spec) for stage in stages for spec in stage.params}
+        self.sliders = {name: ParamSlider(spec) for name, spec in param_specs().items()}
         self._stage_of = {spec.name: stage.name for stage in stages for spec in stage.params}
         layout = QVBoxLayout(self)
         layout.addLayout(seed_row)

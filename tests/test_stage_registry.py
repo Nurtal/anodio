@@ -82,7 +82,7 @@ def test_registered_stage_is_available_from_the_gui(registered, app):
     panel = ParamsPanel()
 
     assert panel.stage_boxes["invert"].text() == "Inversion de polarité"
-    assert "invert_gain" in panel.sliders
+    assert list(panel.sliders) == ["mcadams_alpha", "pitch_semitones", "formant_ratio", "vtln_alpha", "invert_gain"]
     assert "invert" in panel.params().stages
     panel.stage_boxes["invert"].setChecked(False)
     assert "invert" not in panel.params().stages

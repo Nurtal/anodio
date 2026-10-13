@@ -12,8 +12,10 @@ from typing import Protocol
 
 import numpy as np
 
-from anodio.core.audio import ANALYSIS_SAMPLE_RATE, AnodioError, Audio, resample
+from anodio.core.audio import AnodioError, Audio, resample
 
+# The rate ECAPA and Whisper were trained at.
+MODEL_SAMPLE_RATE = 16000
 ECAPA_REPO = "speechbrain/spkrec-ecapa-voxceleb"
 
 
@@ -52,7 +54,7 @@ def _require(path: Path, what: str) -> Path:
 
 
 def to_model_rate(audio: Audio) -> np.ndarray:
-    return resample(audio, ANALYSIS_SAMPLE_RATE).samples.astype(np.float32)
+    return resample(audio, MODEL_SAMPLE_RATE).samples.astype(np.float32)
 
 
 class EcapaEmbedder:

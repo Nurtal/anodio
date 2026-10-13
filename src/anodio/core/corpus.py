@@ -23,12 +23,12 @@ from anodio.core.evaluate import Thresholds, clinical_deviation, clinical_featur
 from anodio.core.models import SpeakerEmbedder, Transcriber
 from anodio.core.params import Params, draw_params
 from anodio.core.report import Report
-from anodio.core.thresholds import ClinicalThresholds
+from anodio.core.thresholds import ClinicalThresholds, DeviationKind
 
 
 @dataclass(frozen=True)
-class AttackResult:
-    """Outcome of the trials of one attack condition."""
+class ConditionResult:
+    """Outcome of the trials of one condition (Baseline or attack)."""
 
     eer: float
     target_trials: int
@@ -39,11 +39,11 @@ class AttackResult:
 
 @dataclass(frozen=True)
 class PrivacyResult:
-    baseline: AttackResult
-    ignorant: AttackResult
-    lazy_informed: AttackResult
+    baseline: ConditionResult
+    ignorant: ConditionResult
+    lazy_informed: ConditionResult
 
-    def conditions(self) -> dict[str, AttackResult]:
+    def conditions(self) -> dict[str, ConditionResult]:
         return {"baseline": self.baseline, "ignorant": self.ignorant, "lazy_informed": self.lazy_informed}
 
 
@@ -57,7 +57,7 @@ class ContentSummary:
 class ClinicalFeatureSummary:
     """Deviations of one Clinical feature over the corpus (None when it was never measurable)."""
 
-    kind: str  # "relative" or "absolute"
+    kind: DeviationKind
     mean: float | None
     median: float | None
     max: float | None
@@ -95,16 +95,16 @@ def equal_error_rate(scores: np.ndarray, is_target: np.ndarray) -> float:
     return best
 
 
-def _attack(
+def _condition_result(
     trials: Sequence[tuple[int, int]],
     enrolment: Sequence[np.ndarray],
     test: Sequence[np.ndarray],
     speakers: Sequence[str],
-) -> AttackResult:
+) -> ConditionResult:
     """Score every (enrolment index, test index) trial; a trial is a target when both are the same Speaker."""
     scores = np.array([cosine_similarity(enrolment[i], test[j]) for i, j in trials])
     is_target = np.array([speakers[i] == speakers[j] for i, j in trials])
-    return AttackResult(
+    return ConditionResult(
         eer=equal_error_rate(scores, is_target),
         target_trials=int(is_target.sum()),
         nontarget_trials=int((~is_target).sum()),
@@ -146,9 +146,9 @@ def evaluate_corpus(
         attacker_seed=attacker_seed,
         embedder=embedder.name,
         privacy=PrivacyResult(
-            baseline=_attack(list(combinations(range(n), 2)), originals, originals, speakers),
-            ignorant=_attack(ordered, originals, anonymized, speakers),
-            lazy_informed=_attack(ordered, attacker, anonymized, speakers),
+            baseline=_condition_result(list(combinations(range(n), 2)), originals, originals, speakers),
+            ignorant=_condition_result(ordered, originals, anonymized, speakers),
+            lazy_informed=_condition_result(ordered, attacker, anonymized, speakers),
         ),
         content=_content_summary(reports) if transcriber else None,
         clinical=_clinical_summary(reports),
@@ -166,15 +166,15 @@ def _content_summary(reports: Sequence[Report]) -> ContentSummary:
 
 
 def _clinical_summary(reports: Sequence[Report]) -> dict[str, ClinicalFeatureSummary]:
-    axes = [report.axes["clinical"] for report in reports]
+    axes = [(axis.measures, ClinicalThresholds(axis.thresholds)) for axis in (r.axes["clinical"] for r in reports)]
     summary = {}
-    for feature in clinical_feature_names(axes[0].measures):
-        deviations = [clinical_deviation(axis.measures, feature, ClinicalThresholds(axis.thresholds)) for axis in axes]
+    for feature in clinical_feature_names(axes[0][0]):
+        deviations = [clinical_deviation(measures, feature, thresholds) for measures, thresholds in axes]
         limit = deviations[-1].limit
         values = np.array([deviation.value for deviation in deviations if deviation.value is not None])
         measured = len(values) > 0
         summary[feature] = ClinicalFeatureSummary(
-            kind=str(limit.kind),
+            kind=limit.kind,
             mean=float(values.mean()) if measured else None,
             median=float(np.median(values)) if measured else None,
             max=float(values.max()) if measured else None,

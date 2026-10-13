@@ -62,15 +62,14 @@ def test_five_minutes_are_drawn_in_under_half_a_second(app):
     audio = Audio(rng.uniform(-1, 1, FIVE_MINUTES * 44100).astype(np.float32), 44100)
     view = WaveformView()
     view.resize(900, 200)
-    view.show(audio)  # the first draw also pays for matplotlib's one-off set-up
+    view.show(Audio(audio.samples[:44100], 44100))  # matplotlib's one-off set-up, paid when the window opens
     view.draw()
 
-    start = time.perf_counter()
-    view.show(audio, audio)
-    view.draw()
-    elapsed = time.perf_counter() - start
-
-    assert elapsed < 0.5
+    for shown in ((audio,), (audio, audio)):  # on load, then after the Anonymization
+        start = time.perf_counter()
+        view.show(*shown)
+        view.draw()
+        assert time.perf_counter() - start < 0.5
 
 
 @pytest.fixture
