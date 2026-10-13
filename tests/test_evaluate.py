@@ -19,14 +19,26 @@ def test_anonymization_keeps_the_timing(speech):
     assert report.axes["prosody"].verdict is True
 
 
-def test_moved_pause_fails_the_timing_check(speech):
+def test_moved_pause_is_reported_without_being_judged(speech):
     delay = int(0.15 * speech.sample_rate)
     shifted = Audio(np.concatenate([np.zeros(delay, np.float32), speech.samples[:-delay]]), speech.sample_rate)
 
-    report = evaluate(speech, shifted)
+    prosody = evaluate(speech, shifted).axes["prosody"]
 
-    assert report.axes["prosody"].verdict is False
-    assert report.axes["prosody"].measures["pause_boundary_error_ms"] >= 140
+    assert prosody.measures["pause_boundary_error_ms"] >= 140
+    assert not any("pause" in failure for failure in prosody.failures)
+    assert "max_pause_boundary_error_ms" not in prosody.thresholds
+
+
+def test_different_pause_count_is_reported_without_being_judged(speech):
+    filled = speech.samples.copy()
+    silent = np.flatnonzero(np.abs(filled) < 1e-6)
+    filled[silent] = speech.samples[: len(silent)]
+
+    prosody = evaluate(speech, Audio(filled, speech.sample_rate)).axes["prosody"]
+
+    assert prosody.measures["pause_count_anonymized"] != prosody.measures["pause_count_original"]
+    assert not any("pause" in failure for failure in prosody.failures)
 
 
 def test_report_carries_params_and_round_trips_through_json(speech):

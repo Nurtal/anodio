@@ -63,7 +63,7 @@ Les Safe ranges excluent volontairement les valeurs proches de l'identité, qui 
 |---|---|---|
 | **Privacy** | Similarité cosinus entre les embeddings ECAPA de l'original et de la version anonymisée | < 0,25 |
 | **Contenu** | WER de la transcription Whisper de la version anonymisée, en prenant celle de l'original comme référence | < 5 % |
-| **Prosodie** | Corrélation des contours de F0 normalisés (demi-tons / médiane), position des pauses et durée, DTW de l'énergie | corrélation ≥ 0,9 ; décalage des pauses ≤ 20 ms |
+| **Prosodie** | Corrélation des contours de F0 normalisés (demi-tons / médiane), durée ; position des pauses et DTW de l'énergie rapportées sans être jugées | corrélation ≥ 0,9 ; durée identique |
 | **Clinique** | CV et écart-type (en demi-tons) du F0, jitter, shimmer, HNR, débit, nombre et durée des pauses | écart relatif ≤ 10 % (shimmer : 25 %) ; HNR : écart ≤ 3 dB |
 | **Informatif** | KL, Jensen-Shannon et Wasserstein entre les distributions de MFCC, de F0 et d'énergie | jamais jugé |
 
